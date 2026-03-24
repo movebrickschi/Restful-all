@@ -1,0 +1,42 @@
+<!-- Plugin Configuration File: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<idea-plugin>
+    <!-- Unique identifier of the plugin. It should be FQN, cannot be changed between the plugin versions. -->
+    <id>io.github.movebrickschi.Restful-all</id>
+
+    <!-- Public plugin name should be written in Title Case.
+         Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-name -->
+    <name>Restful-all</name>
+
+    <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
+    <vendor url="https://www.yourcompany.com">YourCompany</vendor>
+
+    <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
+         Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
+    <description><![CDATA[
+        Discover and navigate to REST API routes across multiple frameworks.<br>
+        Supports NestJS, Spring Boot, Express.js, FastAPI, and Flask.<br>
+        Use <b>Ctrl+Alt+/</b> (or <b>Cmd+Alt+/</b> on Mac) to open the route search popup.
+    ]]></description>
+
+    <depends>com.intellij.modules.compose</depends>
+    <depends>com.intellij.modules.platform</depends>
+
+    <resource-bundle>messages.MyMessageBundle</resource-bundle>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="MyToolWindow" factoryClass="io.github.movebrickschi.restfulall.MyToolWindowFactory"
+                    icon="AllIcons.Toolwindows.ToolWindowPalette"/>
+        <projectService serviceImplementation="io.github.movebrickschi.restfulall.service.RouteService"/>
+    </extensions>
+
+    <actions>
+        <action id="Restful-all.SearchRoute"
+                class="io.github.movebrickschi.restfulall.action.SearchRouteAction"
+                text="搜索 REST 路由"
+                description="搜索项目中的 REST API 路由并快速跳转">
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt SLASH"/>
+            <add-to-group group-id="GoToMenu" anchor="last"/>
+            <add-to-group group-id="MainToolBar" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>

@@ -13,9 +13,23 @@
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
-        Discover and navigate to REST API routes across multiple frameworks.<br>
-        Supports NestJS, Spring Boot, Express.js, FastAPI, and Flask.<br>
-        Use <b>Ctrl+Alt+/</b> (or <b>Cmd+Alt+/</b> on Mac) to open the route search popup.
+        <h3>English</h3>
+        <p>Discover and navigate to REST API routes across multiple frameworks.</p>
+        <ul>
+            <li>Supports Spring Boot, NestJS, Express.js, FastAPI, and Flask.</li>
+            <li>Use <b>Ctrl+Alt+/</b> (or <b>Cmd+Alt+/</b> on Mac) to open the route search popup for quick navigation.</li>
+            <li>Provides a tool window panel to browse all discovered routes in the project.</li>
+            <li>Built with Compose UI for a modern and responsive user interface.</li>
+        </ul>
+
+        <h3>中文</h3>
+        <p>发现和导航多种框架的 REST API 路由。</p>
+        <ul>
+            <li>支持 Spring Boot、NestJS、Express.js、FastAPI 和 Flask。</li>
+            <li>使用 <b>Ctrl+Alt+/</b>（Mac 上为 <b>Cmd+Alt+/</b>）打开路由搜索弹窗，快速跳转到对应接口。</li>
+            <li>提供工具窗口面板，浏览项目中所有已发现的路由。</li>
+            <li>基于 Compose UI 构建，提供现代化的响应式用户界面。</li>
+        </ul>
     ]]></description>
 
     <depends>com.intellij.modules.compose</depends>

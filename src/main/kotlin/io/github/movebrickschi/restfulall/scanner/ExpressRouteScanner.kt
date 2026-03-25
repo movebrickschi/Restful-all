@@ -19,9 +19,11 @@ class ExpressRouteScanner : RouteScanner {
         if (!content.contains("router.") && !content.contains("app.")) return emptyList()
 
         val lines = content.lines()
+        val commentMap = CommentFilter.buildCommentMap(lines, CommentFilter.Language.C_STYLE)
         val routes = mutableListOf<RouteInfo>()
 
         for ((index, line) in lines.withIndex()) {
+            if (commentMap[index]) continue
             val match = ROUTE_PATTERN.find(line) ?: continue
             val httpMethodStr = match.groupValues[1]
             val path = match.groupValues[2]

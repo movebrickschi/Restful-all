@@ -21,6 +21,7 @@ class SpringRouteScanner : RouteScanner {
         ) return emptyList()
 
         val lines = content.lines()
+        val commentMap = CommentFilter.buildCommentMap(lines, CommentFilter.Language.C_STYLE)
         val routes = mutableListOf<RouteInfo>()
 
         var classPrefix = ""
@@ -28,6 +29,7 @@ class SpringRouteScanner : RouteScanner {
         var isController = false
 
         for ((index, line) in lines.withIndex()) {
+            if (commentMap[index]) continue
             val trimmed = line.trim()
 
             if (CONTROLLER_ANNOTATION.containsMatchIn(trimmed)) {

@@ -23,6 +23,7 @@ class NestJsRouteScanner : RouteScanner {
         LOG.debug("Scanning NestJS file: ${file.path}")
 
         val lines = content.lines()
+        val commentMap = CommentFilter.buildCommentMap(lines, CommentFilter.Language.C_STYLE)
         val routes = mutableListOf<RouteInfo>()
 
         var controllerPrefix = ""
@@ -30,6 +31,7 @@ class NestJsRouteScanner : RouteScanner {
         var inController = false
 
         for ((index, line) in lines.withIndex()) {
+            if (commentMap[index]) continue
             val trimmed = line.trim()
 
             val controllerMatch = CONTROLLER_PATTERN.find(trimmed)

@@ -25,9 +25,11 @@ class PythonRouteScanner : RouteScanner {
         ) return emptyList()
 
         val lines = content.lines()
+        val commentMap = CommentFilter.buildCommentMap(lines, CommentFilter.Language.PYTHON)
         val routes = mutableListOf<RouteInfo>()
 
         for ((index, line) in lines.withIndex()) {
+            if (commentMap[index]) continue
             val fastApiMatch = FASTAPI_PATTERN.find(line)
             if (fastApiMatch != null) {
                 val httpMethodStr = fastApiMatch.groupValues[1]

@@ -1,6 +1,10 @@
 package io.github.movebrickschi.restfulall.ui
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.popup.JBPopup
 import com.intellij.openapi.ui.popup.JBPopupFactory
@@ -10,23 +14,33 @@ import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBTextField
 import io.github.movebrickschi.restfulall.model.HttpMethod
 import io.github.movebrickschi.restfulall.model.RouteInfo
+import io.github.movebrickschi.restfulall.service.RouteService
 import java.awt.BorderLayout
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.*
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
 class RouteSearchPopup(
     private val project: Project,
-    private val allRoutes: List<RouteInfo>,
+    private var allRoutes: List<RouteInfo>,
     private val initialQuery: String? = null,
 ) {
     private val listModel = DefaultListModel<RouteInfo>()
     private val routeList = JBList(listModel)
     private val searchField = JBTextField()
     private val statusLabel = JLabel()
+    private val refreshLabel = JLabel("↻ 刷新").apply {
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        foreground = java.awt.Color(0x58, 0x9D, 0xF6)
+        font = font.deriveFont(11f)
+        toolTipText = "重新扫描项目路由 (F5)"
+    }
     private var popup: JBPopup? = null
     private val debounceTimer = Timer(DEBOUNCE_MS) { updateList(searchField.text) }.apply {
         isRepeats = false
@@ -74,15 +88,54 @@ class RouteSearchPopup(
                         popup?.cancel()
                         e.consume()
                     }
+                    KeyEvent.VK_F5 -> {
+                        doRefresh()
+                        e.consume()
+                    }
                 }
             }
         })
 
+        refreshLabel.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) = doRefresh()
+        })
+
         routeList.cellRenderer = RouteCellRenderer()
         routeList.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        routeList.addMouseListener(object : java.awt.event.MouseAdapter() {
-            override fun mouseClicked(e: java.awt.event.MouseEvent) {
+        routeList.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
                 if (e.clickCount == 2) navigateToSelected()
+            }
+        })
+    }
+
+    private fun doRefresh() {
+        val routeService = RouteService.getInstance(project)
+        if (routeService.isScanning) return
+
+        refreshLabel.text = "⏳ 扫描中..."
+        refreshLabel.isEnabled = false
+
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "重新扫描路由...", true) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                routeService.scanProject()
+            }
+
+            override fun onSuccess() {
+                ApplicationManager.getApplication().invokeLater {
+                    allRoutes = routeService.getCachedRoutes()
+                    updateList(searchField.text)
+                    refreshLabel.text = "↻ 刷新"
+                    refreshLabel.isEnabled = true
+                }
+            }
+
+            override fun onCancel() {
+                ApplicationManager.getApplication().invokeLater {
+                    refreshLabel.text = "↻ 刷新"
+                    refreshLabel.isEnabled = true
+                }
             }
         })
     }
@@ -143,9 +196,13 @@ class RouteSearchPopup(
             }
             add(scrollPane, BorderLayout.CENTER)
 
-            statusLabel.font = statusLabel.font.deriveFont(11f)
-            statusLabel.foreground = java.awt.Color.GRAY
-            add(statusLabel, BorderLayout.SOUTH)
+            val bottomBar = JPanel(BorderLayout()).apply {
+                statusLabel.font = statusLabel.font.deriveFont(11f)
+                statusLabel.foreground = java.awt.Color.GRAY
+                add(statusLabel, BorderLayout.WEST)
+                add(refreshLabel, BorderLayout.EAST)
+            }
+            add(bottomBar, BorderLayout.SOUTH)
         }
 
         popup = JBPopupFactory.getInstance()

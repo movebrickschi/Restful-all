@@ -1,5 +1,6 @@
 package io.github.movebrickschi.restfulall.service
 
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
@@ -7,11 +8,19 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.newvfs.BulkFileListener
+import com.intellij.openapi.vfs.newvfs.events.*
 import io.github.movebrickschi.restfulall.model.RouteInfo
 import io.github.movebrickschi.restfulall.scanner.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import kotlin.concurrent.read
+import kotlin.concurrent.write
 
 @Service(Service.Level.PROJECT)
-class RouteService(private val project: Project) {
+class RouteService(private val project: Project) : Disposable {
 
     private val scanners: List<RouteScanner> = listOf(
         NestJsRouteScanner(),
@@ -23,54 +32,128 @@ class RouteService(private val project: Project) {
     private val supportedExtensions: Set<String> =
         scanners.flatMap { it.supportedExtensions() }.toSet()
 
+    private val routesByFile = ConcurrentHashMap<String, List<RouteInfo>>()
+    private val lock = ReentrantReadWriteLock()
+
     @Volatile
-    private var cachedRoutes: List<RouteInfo> = emptyList()
+    private var sortedCache: List<RouteInfo> = emptyList()
+    private val initialScanDone = AtomicBoolean(false)
+    private val scanning = AtomicBoolean(false)
 
-    fun scanProject(): List<RouteInfo> {
-        val routes = mutableListOf<RouteInfo>()
+    init {
+        project.messageBus.connect(this).subscribe(
+            VirtualFileManager.VFS_CHANGES,
+            object : BulkFileListener {
+                override fun after(events: MutableList<out VFileEvent>) {
+                    if (!initialScanDone.get()) return
+                    val affectedFiles = mutableSetOf<VirtualFile>()
+                    val deletedPaths = mutableSetOf<String>()
 
-        ReadAction.run<Throwable> {
-            var totalFiles = 0
-            var scannedFiles = 0
+                    for (event in events) {
+                        when (event) {
+                            is VFileContentChangeEvent -> event.file.let { affectedFiles.add(it) }
+                            is VFileCreateEvent -> event.file?.let { affectedFiles.add(it) }
+                            is VFileMoveEvent -> {
+                                deletedPaths.add(event.oldPath)
+                                event.file.let { affectedFiles.add(it) }
+                            }
+                            is VFileDeleteEvent -> deletedPaths.add(event.path)
+                            is VFileCopyEvent -> event.file?.let { affectedFiles.add(it) }
+                        }
+                    }
 
-            val fileIndex = ProjectFileIndex.getInstance(project)
-            fileIndex.iterateContent { file ->
-                totalFiles++
-                if (!file.isDirectory && shouldScan(file)) {
-                    scannedFiles++
-                    scanFileWithAllScanners(file, routes)
+                    var changed = false
+                    for (path in deletedPaths) {
+                        if (routesByFile.remove(path) != null) changed = true
+                    }
+                    for (file in affectedFiles) {
+                        if (file.isDirectory || !shouldScan(file)) continue
+                        val newRoutes = scanSingleFile(file)
+                        val old = routesByFile.put(file.path, newRoutes)
+                        if (old != newRoutes) changed = true
+                    }
+                    if (changed) rebuildSortedCache()
                 }
-                true
             }
-
-            LOG.info("ProjectFileIndex: iterated $totalFiles files, scanned $scannedFiles matching files, found ${routes.size} routes")
-
-            if (scannedFiles == 0) {
-                LOG.info("ProjectFileIndex found 0 scannable files, falling back to VFS recursive scan...")
-                val baseDir = project.basePath?.let {
-                    LocalFileSystem.getInstance().findFileByPath(it)
-                }
-                if (baseDir != null) {
-                    scanDirectoryRecursively(baseDir, routes)
-                    LOG.info("VFS fallback scan found ${routes.size} routes")
-                } else {
-                    LOG.warn("Cannot determine project base directory for VFS fallback")
-                }
-            }
-        }
-
-        val deduplicated = routes
-            .distinctBy { "${it.method}:${it.fullPath}:${it.file.path}:${it.lineNumber}" }
-            .sortedWith(compareBy({ it.fullPath }, { it.method.name }))
-
-        cachedRoutes = deduplicated
-        LOG.info("Route scan complete: ${deduplicated.size} unique routes (from ${routes.size} total)")
-        return deduplicated
+        )
     }
 
-    fun getCachedRoutes(): List<RouteInfo> = cachedRoutes
+    val isInitialScanDone: Boolean get() = initialScanDone.get()
+    val isScanning: Boolean get() = scanning.get()
 
-    private fun scanFileWithAllScanners(file: VirtualFile, routes: MutableList<RouteInfo>) {
+    fun scanProject(): List<RouteInfo> {
+        if (!scanning.compareAndSet(false, true)) {
+            LOG.info("Scan already in progress, skipping")
+            return getCachedRoutes()
+        }
+
+        try {
+            val newRoutesByFile = ConcurrentHashMap<String, List<RouteInfo>>()
+
+            ReadAction.run<Throwable> {
+                var totalFiles = 0
+                var scannedFiles = 0
+
+                val fileIndex = ProjectFileIndex.getInstance(project)
+                fileIndex.iterateContent { file ->
+                    totalFiles++
+                    if (!file.isDirectory && shouldScan(file)) {
+                        scannedFiles++
+                        val routes = scanSingleFile(file)
+                        if (routes.isNotEmpty()) {
+                            newRoutesByFile[file.path] = routes
+                        }
+                    }
+                    true
+                }
+
+                LOG.info("ProjectFileIndex: iterated $totalFiles files, scanned $scannedFiles matching files")
+
+                if (scannedFiles == 0) {
+                    LOG.info("ProjectFileIndex found 0 scannable files, falling back to VFS recursive scan...")
+                    val baseDir = project.basePath?.let {
+                        LocalFileSystem.getInstance().findFileByPath(it)
+                    }
+                    if (baseDir != null) {
+                        scanDirectoryRecursively(baseDir, newRoutesByFile)
+                    } else {
+                        LOG.warn("Cannot determine project base directory for VFS fallback")
+                    }
+                }
+            }
+
+            lock.write {
+                routesByFile.clear()
+                routesByFile.putAll(newRoutesByFile)
+            }
+            rebuildSortedCache()
+            initialScanDone.set(true)
+
+            LOG.info("Route scan complete: ${sortedCache.size} unique routes from ${routesByFile.size} files")
+            return sortedCache
+        } finally {
+            scanning.set(false)
+        }
+    }
+
+    fun getCachedRoutes(): List<RouteInfo> = lock.read { sortedCache }
+
+    fun updateFile(file: VirtualFile) {
+        if (!shouldScan(file)) {
+            if (routesByFile.remove(file.path) != null) rebuildSortedCache()
+            return
+        }
+        val routes = scanSingleFile(file)
+        routesByFile[file.path] = routes
+        rebuildSortedCache()
+    }
+
+    fun removeFile(path: String) {
+        if (routesByFile.remove(path) != null) rebuildSortedCache()
+    }
+
+    private fun scanSingleFile(file: VirtualFile): List<RouteInfo> {
+        val routes = mutableListOf<RouteInfo>()
         try {
             for (scanner in scanners) {
                 if (file.extension in scanner.supportedExtensions()) {
@@ -80,17 +163,29 @@ class RouteService(private val project: Project) {
         } catch (e: Exception) {
             LOG.warn("Failed to scan file: ${file.path}", e)
         }
+        return routes
     }
 
-    private fun scanDirectoryRecursively(dir: VirtualFile, routes: MutableList<RouteInfo>) {
+    private fun rebuildSortedCache() {
+        lock.write {
+            sortedCache = routesByFile.values.flatten()
+                .distinctBy { "${it.method}:${it.fullPath}:${it.file.path}:${it.lineNumber}" }
+                .sortedWith(compareBy({ it.fullPath }, { it.method.name }))
+        }
+    }
+
+    private fun scanDirectoryRecursively(dir: VirtualFile, result: ConcurrentHashMap<String, List<RouteInfo>>) {
         val children = dir.children ?: return
         for (child in children) {
             if (child.isDirectory) {
                 if (child.name !in SKIP_DIRECTORIES) {
-                    scanDirectoryRecursively(child, routes)
+                    scanDirectoryRecursively(child, result)
                 }
-            } else if (child.extension in supportedExtensions) {
-                scanFileWithAllScanners(child, routes)
+            } else if (shouldScan(child)) {
+                val routes = scanSingleFile(child)
+                if (routes.isNotEmpty()) {
+                    result[child.path] = routes
+                }
             }
         }
     }
@@ -106,10 +201,12 @@ class RouteService(private val project: Project) {
         return true
     }
 
+    override fun dispose() {}
+
     companion object {
         private val LOG = Logger.getInstance(RouteService::class.java)
 
-        private const val MAX_FILE_SIZE = 512L * 1024 // 512KB
+        private const val MAX_FILE_SIZE = 512L * 1024
 
         private val SKIP_DIRECTORIES = setOf(
             "node_modules", "dist", "build", ".git", ".gradle",

@@ -8,7 +8,7 @@
     <name>Restful-all</name>
 
     <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
-    <vendor url="https://www.yourcompany.com">YourCompany</vendor>
+    <vendor>movebrickchi</vendor>
 
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
@@ -41,6 +41,7 @@
         <toolWindow id="MyToolWindow" factoryClass="io.github.movebrickschi.restfulall.MyToolWindowFactory"
                     icon="AllIcons.Toolwindows.ToolWindowPalette"/>
         <projectService serviceImplementation="io.github.movebrickschi.restfulall.service.RouteService"/>
+        <postStartupActivity implementation="io.github.movebrickschi.restfulall.service.RouteScanStartupActivity"/>
     </extensions>
 
     <actions>

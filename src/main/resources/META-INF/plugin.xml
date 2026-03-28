@@ -14,21 +14,29 @@
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
         <h3>English</h3>
-        <p>Discover and navigate to REST API routes across multiple frameworks.</p>
+        <p>Discover, navigate, and debug REST API routes across multiple frameworks.</p>
         <ul>
             <li>Supports Spring Boot, NestJS, Express.js, FastAPI, and Flask.</li>
             <li>Use <b>Ctrl+Alt+/</b> (or <b>Cmd+Alt+/</b> on Mac) to open the route search popup for quick navigation.</li>
-            <li>Provides a tool window panel to browse all discovered routes in the project.</li>
-            <li>Built with Compose UI for a modern and responsive user interface.</li>
+            <li>Full-featured API debug panel with support for GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS.</li>
+            <li>Multiple body types: form-data (file upload), x-www-form-urlencoded, JSON, XML, raw.</li>
+            <li>Per-module base URL configuration with auto-detection from application.properties/yml.</li>
+            <li>Global parameters (Query, Body, Headers, Cookies) automatically merged into every request.</li>
+            <li>Request history with up to 500 entries, grouped by date, with full replay support.</li>
+            <li>Double-click routes to jump to source code. Press <b>Ctrl+Shift+C</b> in a route method to copy the API path.</li>
         </ul>
 
         <h3>中文</h3>
-        <p>发现和导航多种框架的 REST API 路由。</p>
+        <p>发现、导航和调试多种框架的 REST API 路由。</p>
         <ul>
             <li>支持 Spring Boot、NestJS、Express.js、FastAPI 和 Flask。</li>
             <li>使用 <b>Ctrl+Alt+/</b>（Mac 上为 <b>Cmd+Alt+/</b>）打开路由搜索弹窗，快速跳转到对应接口。</li>
-            <li>提供工具窗口面板，浏览项目中所有已发现的路由。</li>
-            <li>基于 Compose UI 构建，提供现代化的响应式用户界面。</li>
+            <li>完整的 API 调试面板，支持 GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS 请求。</li>
+            <li>多种 Body 类型：form-data（文件上传）、x-www-form-urlencoded、JSON、XML、raw。</li>
+            <li>按模块配置前置 URL，支持从 application.properties/yml 自动检测端口和 context-path。</li>
+            <li>全局参数（Query、Body、Headers、Cookies）自动合并到每次请求中。</li>
+            <li>请求历史最多记录 500 条，按日期分组，支持完整回放。</li>
+            <li>双击路由跳转到源码。在方法体内按 <b>Ctrl+Shift+C</b> 复制 API 路由路径。</li>
         </ul>
     ]]></description>
 
@@ -38,9 +46,10 @@
     <resource-bundle>messages.MyMessageBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow id="MyToolWindow" factoryClass="io.github.movebrickschi.restfulall.MyToolWindowFactory"
-                    icon="AllIcons.Toolwindows.ToolWindowPalette"/>
+        <toolWindow id="Restful-all" factoryClass="io.github.movebrickschi.restfulall.MyToolWindowFactory"
+                    icon="AllIcons.General.Web" anchor="bottom"/>
         <projectService serviceImplementation="io.github.movebrickschi.restfulall.service.RouteService"/>
+        <projectService serviceImplementation="io.github.movebrickschi.restfulall.service.PluginSettingsState"/>
         <postStartupActivity implementation="io.github.movebrickschi.restfulall.service.RouteScanStartupActivity"/>
     </extensions>
 
@@ -51,7 +60,22 @@
                 description="搜索项目中的 REST API 路由并快速跳转">
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt SLASH"/>
             <add-to-group group-id="GoToMenu" anchor="last"/>
+        </action>
+
+        <action id="Restful-all.OpenDebugToolWindow"
+                class="io.github.movebrickschi.restfulall.action.OpenDebugToolWindowAction"
+                text="API 调试"
+                description="打开 REST API 调试工具窗口"
+                icon="AllIcons.General.Web">
             <add-to-group group-id="MainToolBar" anchor="last"/>
+        </action>
+
+        <action id="Restful-all.CopyRoutePath"
+                class="io.github.movebrickschi.restfulall.action.CopyRoutePathAction"
+                text="复制 API 路由路径"
+                description="复制当前光标所在的 API 路由路径到剪贴板">
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift C"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
         </action>
     </actions>
 </idea-plugin>

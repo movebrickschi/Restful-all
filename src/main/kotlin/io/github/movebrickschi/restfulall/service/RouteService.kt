@@ -138,6 +138,13 @@ class RouteService(private val project: Project) : Disposable {
 
     fun getCachedRoutes(): List<RouteInfo> = lock.read { sortedCache }
 
+    fun findRouteAt(file: VirtualFile, line: Int): RouteInfo? {
+        val routes = routesByFile[file.path] ?: return null
+        return routes
+            .filter { it.lineNumber <= line }
+            .maxByOrNull { it.lineNumber }
+    }
+
     fun updateFile(file: VirtualFile) {
         if (!shouldScan(file)) {
             if (routesByFile.remove(file.path) != null) rebuildSortedCache()

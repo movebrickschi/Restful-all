@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "io.github.movebrickschi"
-version = "1.1.1"
+version = "1.1.2"
 
 repositories {
     mavenCentral()
@@ -36,6 +36,18 @@ intellijPlatform {
         }
 
         changeNotes = """
+            <h3>1.1.2 - Internationalization</h3>
+            <ul>
+                <li><b>Internationalization</b>: Added full i18n support with Chinese and English bundles; all tool window labels, buttons and messages are now translatable.</li>
+                <li><b>Language Switcher</b>: New language selector in the tool window header with three options - <b>Auto</b> (follow IDE), <b>中文</b>, <b>English</b> - switchable at runtime without restart.</li>
+            </ul>
+
+            <h3>1.1.2 - 国际化</h3>
+            <ul>
+                <li><b>国际化支持</b>：新增完整的中英文资源包，工具窗中的标签、按钮与提示文案均可按语言切换。</li>
+                <li><b>语言切换器</b>：工具窗标题栏新增语言下拉，提供 <b>Auto</b>（跟随 IDE）、<b>中文</b>、<b>English</b> 三种选项，运行时即时切换，无需重启。</li>
+            </ul>
+
             <h3>1.1.1 - Feature Update</h3>
             <ul>
                 <li><b>JSON Formatting</b>: One-click JSON formatting for global body content and response body.</li>

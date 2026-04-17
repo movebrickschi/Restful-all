@@ -2,6 +2,7 @@ package io.github.movebrickschi.restfulall.ui
 
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
+import io.github.movebrickschi.restfulall.MyMessageBundle
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Cursor
@@ -50,6 +51,17 @@ class ParamTablePanel : JPanel(BorderLayout()) {
         add(JBScrollPane(table), BorderLayout.CENTER)
     }
 
+    fun refreshColumnHeaders() {
+        tableModel.fireTableStructureChanged()
+        table.columnModel.getColumn(COL_ENABLED).apply {
+            preferredWidth = 32; maxWidth = 32; minWidth = 32
+        }
+        table.columnModel.getColumn(COL_DELETE).apply {
+            preferredWidth = 32; maxWidth = 32; minWidth = 32
+            cellRenderer = DeleteCellRenderer()
+        }
+    }
+
     fun getParams(): List<Pair<String, String>> {
         if (table.isEditing) table.cellEditor?.stopCellEditing()
         return params.filter { it.enabled && it.name.isNotBlank() }
@@ -84,8 +96,8 @@ class ParamTablePanel : JPanel(BorderLayout()) {
         override fun getColumnCount() = 4
         override fun getColumnName(column: Int) = when (column) {
             COL_ENABLED -> ""
-            COL_NAME -> "参数名"
-            COL_VALUE -> "参数值"
+            COL_NAME -> MyMessageBundle.message("param.table.column.name")
+            COL_VALUE -> MyMessageBundle.message("param.table.column.value")
             COL_DELETE -> ""
             else -> ""
         }

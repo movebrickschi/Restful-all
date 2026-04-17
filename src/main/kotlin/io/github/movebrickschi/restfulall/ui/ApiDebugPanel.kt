@@ -1,6 +1,7 @@
 package io.github.movebrickschi.restfulall.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.project.Project
@@ -12,11 +13,13 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
+import io.github.movebrickschi.restfulall.MyMessageBundle
 import io.github.movebrickschi.restfulall.model.ExtractedMethodParams
 import io.github.movebrickschi.restfulall.model.Framework
 import io.github.movebrickschi.restfulall.model.ParamEntry
 import io.github.movebrickschi.restfulall.model.RequestHistoryEntry
 import io.github.movebrickschi.restfulall.model.RouteInfo
+import io.github.movebrickschi.restfulall.service.LanguageChangeListener
 import io.github.movebrickschi.restfulall.service.PluginSettingsState
 import io.github.movebrickschi.restfulall.service.SpringPsiParamExtractor
 import java.awt.BorderLayout
@@ -49,7 +52,7 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private val methodCombo = JComboBox(arrayOf("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"))
     private val urlField = JBTextField()
-    private val sendButton = JButton("发送")
+    private val sendButton = JButton()
 
     private val queryParamPanel = ParamTablePanel()
     private val bodyTextArea = JsonSyntaxTextPane(editable = true)
@@ -72,7 +75,6 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val bodyCardPanel = JPanel(bodyCardLayout)
 
     private val jsonFormatButton = JButton(AllIcons.Actions.ReformatCode).apply {
-        toolTipText = "格式化 JSON"
         isBorderPainted = false
         isContentAreaFilled = false
         preferredSize = Dimension(28, 28)
@@ -92,6 +94,8 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val responseStatusLabel = JBLabel()
     private val responseFormatCombo = JComboBox(arrayOf("JSON", "Text", "HTML", "XML"))
 
+    private val wsMessageLabel = JBLabel().apply { border = JBUI.Borders.emptyRight(4) }
+
     private val httpClient: HttpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(30))
         .followRedirects(HttpClient.Redirect.NORMAL)
@@ -105,14 +109,12 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
     private var sseThread: Thread? = null
 
     // WebSocket state
-    private val wsMessageField = JBTextField().apply {
-        toolTipText = "输入 WebSocket 消息，Enter 发送"
-    }
-    private val wsSendMsgButton = JButton("发送")
+    private val wsMessageField = JBTextField()
+    private val wsSendMsgButton = JButton()
     private val wsMessagePanel = JPanel(BorderLayout(4, 0)).apply {
         border = JBUI.Borders.empty(2, 0, 0, 0)
         isVisible = false
-        add(JBLabel("消息:").apply { border = JBUI.Borders.emptyRight(4) }, BorderLayout.WEST)
+        add(wsMessageLabel, BorderLayout.WEST)
         add(wsMessageField, BorderLayout.CENTER)
         wsSendMsgButton.preferredSize = Dimension(60, 26)
         add(wsSendMsgButton, BorderLayout.EAST)
@@ -123,6 +125,11 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
     init {
         border = JBUI.Borders.empty(2, 4, 4, 4)
         setupUI()
+        applyI18n()
+
+        ApplicationManager.getApplication().messageBus
+            .connect(project)
+            .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener { applyI18n() })
     }
 
     private fun setupUI() {
@@ -135,7 +142,6 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
 
             sendButton.apply {
                 icon = AllIcons.Actions.Execute
-                toolTipText = "发送请求"
                 preferredSize = Dimension(80, 28)
                 addActionListener {
                     when {
@@ -212,6 +218,25 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         add(splitter, BorderLayout.CENTER)
     }
 
+    private fun applyI18n() {
+        jsonFormatButton.toolTipText = MyMessageBundle.message("debug.json.format.tooltip")
+        sendButton.toolTipText = MyMessageBundle.message("debug.send.tooltip")
+        wsMessageField.toolTipText = MyMessageBundle.message("debug.ws.input.tooltip")
+        wsMessageLabel.text = MyMessageBundle.message("debug.ws.message.label")
+        wsSendMsgButton.text = MyMessageBundle.message("debug.send.button")
+
+        updateSendButtonForUrl()
+        responseHeadersModel.fireTableStructureChanged()
+        responseCookiesModel.fireTableStructureChanged()
+
+        queryParamPanel.refreshColumnHeaders()
+        pathParamPanel.refreshColumnHeaders()
+        headersPanel.refreshColumnHeaders()
+        cookiesPanel.refreshColumnHeaders()
+        urlEncodedPanel.refreshColumnHeaders()
+        formDataPanel.refreshColumnHeaders()
+    }
+
     // ── URL mode sync ─────────────────────────────────────────────────────────
 
     private fun isWsUrl(url: String): Boolean {
@@ -223,7 +248,8 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (isSseStreaming || isWsConnected) return
         val isWs = isWsUrl(urlField.text)
         methodCombo.isVisible = !isWs
-        sendButton.text = if (isWs) "连接" else "发送"
+        sendButton.text = if (isWs) MyMessageBundle.message("debug.connect.button")
+                          else MyMessageBundle.message("debug.send.button")
         sendButton.icon = AllIcons.Actions.Execute
     }
 
@@ -232,9 +258,9 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         methodCombo.isVisible = !isWs && !isWsConnected
         sendButton.icon = AllIcons.Actions.Execute
         sendButton.text = when {
-            isWsConnected -> "断开"
-            isWs          -> "连接"
-            else          -> "发送"
+            isWsConnected -> MyMessageBundle.message("debug.disconnect.button")
+            isWs          -> MyMessageBundle.message("debug.connect.button")
+            else          -> MyMessageBundle.message("debug.send.button")
         }
     }
 
@@ -527,7 +553,7 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         val method = methodCombo.selectedItem as String
         var url = urlField.text.trim()
         if (url.isBlank()) {
-            responseBodyArea.text = "请输入请求 URL"
+            responseBodyArea.text = MyMessageBundle.message("debug.url.empty")
             return
         }
 
@@ -553,9 +579,9 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
 
         sendButton.isEnabled = false
-        sendButton.text = "发送中..."
+        sendButton.text = MyMessageBundle.message("debug.sending.button")
         responseBodyArea.text = ""
-        responseStatusLabel.text = "请求中..."
+        responseStatusLabel.text = MyMessageBundle.message("debug.status.requesting")
         responseStatusLabel.foreground = JBColor.foreground()
         sseCancelled = false
 
@@ -677,21 +703,26 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                                 lastEventId = result.lastEventId
                                 val retryMs = result.retryMs
                                 SwingUtilities.invokeLater {
-                                    responseStatusLabel.text =
-                                        "SSE 正在重连... (第 $reconnectCount/${SSE_MAX_RECONNECTS} 次)"
+                                    responseStatusLabel.text = MyMessageBundle.message(
+                                        "debug.sse.reconnecting", reconnectCount, SSE_MAX_RECONNECTS
+                                    )
                                     responseStatusLabel.foreground = WARN_COLOR
                                 }
                                 Thread.sleep(retryMs)
                                 continue@loop
                             }
-                            // finalize SSE history when loop ends
                             SwingUtilities.invokeLater {
                                 val bodySize = historyEntry.responseBody.length
                                 val sizeText = if (bodySize > 1024) "${bodySize / 1024} KB" else "$bodySize B"
                                 val statusColor = if (historyEntry.responseStatus in 200..299) SUCCESS_COLOR else ERROR_COLOR
-                                val endLabel = if (sseCancelled) "已停止" else "流结束"
-                                responseStatusLabel.text =
-                                    "状态: ${historyEntry.responseStatus}  |  耗时: ${historyEntry.elapsed}ms  |  大小: $sizeText  |  $endLabel"
+                                val endLabel = if (sseCancelled)
+                                    MyMessageBundle.message("debug.stream.stopped")
+                                else
+                                    MyMessageBundle.message("debug.stream.end")
+                                responseStatusLabel.text = MyMessageBundle.message(
+                                    "debug.status.done.stream",
+                                    historyEntry.responseStatus, historyEntry.elapsed, sizeText, endLabel
+                                )
                                 responseStatusLabel.foreground = statusColor
                                 resetSendButton()
                                 state.addHistoryEntry(historyEntry)
@@ -718,12 +749,12 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                     Thread.currentThread().interrupt()
                 } catch (e: Exception) {
                     historyEntry.responseStatus = 0
-                    historyEntry.responseBody = "请求失败: ${e.message}"
+                    historyEntry.responseBody = MyMessageBundle.message("debug.request.failed", e.message ?: "")
                     historyEntry.elapsed = 0
 
                     SwingUtilities.invokeLater {
-                        responseBodyArea.text = "请求失败: ${e.message}"
-                        responseStatusLabel.text = "错误"
+                        responseBodyArea.text = MyMessageBundle.message("debug.request.failed", e.message ?: "")
+                        responseStatusLabel.text = MyMessageBundle.message("debug.status.error")
                         responseStatusLabel.foreground = ERROR_COLOR
                         resetSendButton()
                         state.addHistoryEntry(historyEntry)
@@ -760,12 +791,12 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         SwingUtilities.invokeLater {
             isSseStreaming = true
-            sendButton.text = "停止"
+            sendButton.text = MyMessageBundle.message("debug.stop.button")
             sendButton.icon = AllIcons.Actions.Suspend
             sendButton.isEnabled = true
 
             val statusColor = if (statusCode in 200..299) SUCCESS_COLOR else ERROR_COLOR
-            responseStatusLabel.text = "状态: $statusCode  |  SSE 流式传输中..."
+            responseStatusLabel.text = MyMessageBundle.message("debug.sse.streaming", statusCode)
             responseStatusLabel.foreground = statusColor
             responseBodyArea.text = ""
             responseTabs.selectedIndex = 0
@@ -827,8 +858,9 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                                     responseBodyArea.caretPosition = responseBodyArea.document.length
                                     val sizeText = if (received > 1024) "${received / 1024} KB" else "$received B"
                                     val statusColor = if (statusCode in 200..299) SUCCESS_COLOR else ERROR_COLOR
-                                    responseStatusLabel.text =
-                                        "状态: $statusCode  |  SSE (#$count)  |  已接收: $sizeText"
+                                    responseStatusLabel.text = MyMessageBundle.message(
+                                        "debug.sse.progress", statusCode, count, sizeText
+                                    )
                                     responseStatusLabel.foreground = statusColor
                                 }
                                 currentEventType = "message"
@@ -837,7 +869,6 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                         }
                     }
                 }
-                // dispatch any remaining buffered data (stream closed without trailing blank line)
                 if (dataBuffer.isNotEmpty() && !sseCancelled) {
                     eventCount++
                     val data = dataBuffer.toString().trimEnd('\n')
@@ -854,8 +885,10 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         } catch (e: java.io.IOException) {
             if (!sseCancelled) {
                 shouldReconnect = true
-                val msg = e.message ?: "连接中断"
-                SwingUtilities.invokeLater { responseBodyArea.appendPlain("\n[连接中断] $msg\n") }
+                val msg = e.message ?: MyMessageBundle.message("debug.sse.disconnected")
+                SwingUtilities.invokeLater {
+                    responseBodyArea.appendPlain(MyMessageBundle.message("debug.sse.disconnected.line", msg))
+                }
             }
         }
 
@@ -884,12 +917,12 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         SwingUtilities.invokeLater {
             isSseStreaming = true
-            sendButton.text = "停止"
+            sendButton.text = MyMessageBundle.message("debug.stop.button")
             sendButton.icon = AllIcons.Actions.Suspend
             sendButton.isEnabled = true
 
             val statusColor = if (statusCode in 200..299) SUCCESS_COLOR else ERROR_COLOR
-            responseStatusLabel.text = "状态: $statusCode  |  NDJSON 流式传输中..."
+            responseStatusLabel.text = MyMessageBundle.message("debug.ndjson.streaming", statusCode)
             responseStatusLabel.foreground = statusColor
             responseBodyArea.text = ""
             responseTabs.selectedIndex = 0
@@ -916,8 +949,9 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                         responseBodyArea.caretPosition = responseBodyArea.document.length
                         val sizeText = if (received > 1024) "${received / 1024} KB" else "$received B"
                         val statusColor = if (statusCode in 200..299) SUCCESS_COLOR else ERROR_COLOR
-                        responseStatusLabel.text =
-                            "状态: $statusCode  |  NDJSON (#$count)  |  已接收: $sizeText"
+                        responseStatusLabel.text = MyMessageBundle.message(
+                            "debug.ndjson.progress", statusCode, count, sizeText
+                        )
                         responseStatusLabel.foreground = statusColor
                     }
                 }
@@ -926,8 +960,10 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
             Thread.currentThread().interrupt()
         } catch (e: java.io.IOException) {
             if (!sseCancelled) {
-                val msg = e.message ?: "读取流失败"
-                SwingUtilities.invokeLater { responseBodyArea.appendPlain("\n[错误] $msg\n") }
+                val msg = e.message ?: MyMessageBundle.message("debug.stream.read.failed")
+                SwingUtilities.invokeLater {
+                    responseBodyArea.appendPlain(MyMessageBundle.message("debug.stream.error.line", msg))
+                }
             }
         }
 
@@ -939,10 +975,15 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         SwingUtilities.invokeLater {
             val bodySize = finalBody.length
             val sizeText = if (bodySize > 1024) "${bodySize / 1024} KB" else "$bodySize B"
-            val endLabel = if (sseCancelled) "已停止" else "流结束"
+            val endLabel = if (sseCancelled)
+                MyMessageBundle.message("debug.stream.stopped")
+            else
+                MyMessageBundle.message("debug.stream.end")
             val statusColor = if (statusCode in 200..299) SUCCESS_COLOR else ERROR_COLOR
-            responseStatusLabel.text =
-                "状态: $statusCode  |  耗时: ${elapsed}ms  |  大小: $sizeText  |  $endLabel (共 $lineCount 行)"
+            responseStatusLabel.text = MyMessageBundle.message(
+                "debug.status.done.ndjson",
+                statusCode, elapsed, sizeText, endLabel, lineCount
+            )
             responseStatusLabel.foreground = statusColor
             resetSendButton()
             state.addHistoryEntry(historyEntry)
@@ -956,9 +997,9 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (!isWsUrl(url)) return
 
         sendButton.isEnabled = false
-        sendButton.text = "连接中..."
+        sendButton.text = MyMessageBundle.message("debug.connecting.button")
         responseBodyArea.text = ""
-        responseStatusLabel.text = "WebSocket 连接中..."
+        responseStatusLabel.text = MyMessageBundle.message("debug.ws.connecting")
         responseStatusLabel.foreground = JBColor.foreground()
 
         val listener = object : WebSocket.Listener {
@@ -968,14 +1009,14 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                 webSocket = ws
                 SwingUtilities.invokeLater {
                     isWsConnected = true
-                    sendButton.text = "断开"
+                    sendButton.text = MyMessageBundle.message("debug.disconnect.button")
                     sendButton.icon = AllIcons.Actions.Suspend
                     sendButton.isEnabled = true
                     wsMessagePanel.isVisible = true
-                    responseStatusLabel.text = "WebSocket 已连接"
+                    responseStatusLabel.text = MyMessageBundle.message("debug.ws.connected")
                     responseStatusLabel.foreground = SUCCESS_COLOR
                 }
-                appendWsEvent("已连接", url)
+                appendWsEvent(MyMessageBundle.message("debug.ws.event.connected"), url)
                 ws.request(1)
             }
 
@@ -988,7 +1029,7 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                 if (last) {
                     val msg = textBuffer.toString()
                     textBuffer.clear()
-                    appendWsEvent("收到", msg)
+                    appendWsEvent(MyMessageBundle.message("debug.ws.event.received"), msg)
                 }
                 ws.request(1)
                 return null
@@ -996,26 +1037,29 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
 
             override fun onClose(ws: WebSocket, statusCode: Int, reason: String): CompletionStage<*>? {
                 val r = reason.ifEmpty { "Normal" }
-                appendWsEvent("已断开", "code=$statusCode reason=$r")
+                appendWsEvent(MyMessageBundle.message("debug.ws.event.disconnected"), "code=$statusCode reason=$r")
                 SwingUtilities.invokeLater {
                     isWsConnected = false
                     webSocket = null
                     wsMessagePanel.isVisible = false
                     updateSendButtonForUrl()
-                    responseStatusLabel.text = "WebSocket 已断开  |  code=$statusCode"
+                    responseStatusLabel.text = MyMessageBundle.message("debug.ws.disconnected", statusCode)
                     responseStatusLabel.foreground = WARN_COLOR
                 }
                 return CompletableFuture.completedFuture(null)
             }
 
             override fun onError(ws: WebSocket, error: Throwable) {
-                appendWsEvent("错误", error.message ?: "未知错误")
+                appendWsEvent(
+                    MyMessageBundle.message("debug.ws.event.error"),
+                    error.message ?: MyMessageBundle.message("debug.ws.unknown.error")
+                )
                 SwingUtilities.invokeLater {
                     isWsConnected = false
                     webSocket = null
                     wsMessagePanel.isVisible = false
                     updateSendButtonForUrl()
-                    responseStatusLabel.text = "WebSocket 错误: ${error.message}"
+                    responseStatusLabel.text = MyMessageBundle.message("debug.ws.error", error.message ?: "")
                     responseStatusLabel.foreground = ERROR_COLOR
                 }
             }
@@ -1025,8 +1069,11 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
             .buildAsync(URI.create(url), listener)
             .exceptionally { ex ->
                 SwingUtilities.invokeLater {
-                    responseBodyArea.text = "WebSocket 连接失败: ${ex.cause?.message ?: ex.message}"
-                    responseStatusLabel.text = "连接失败"
+                    responseBodyArea.text = MyMessageBundle.message(
+                        "debug.ws.connect.failed.body",
+                        ex.cause?.message ?: ex.message ?: ""
+                    )
+                    responseStatusLabel.text = MyMessageBundle.message("debug.ws.connect.failed.label")
                     responseStatusLabel.foreground = ERROR_COLOR
                     updateSendButtonForUrl()
                 }
@@ -1035,7 +1082,7 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun disconnectWebSocket() {
-        webSocket?.sendClose(WebSocket.NORMAL_CLOSURE, "用户断开")
+        webSocket?.sendClose(WebSocket.NORMAL_CLOSURE, MyMessageBundle.message("debug.ws.user.close"))
         webSocket = null
         isWsConnected = false
         wsMessagePanel.isVisible = false
@@ -1046,7 +1093,7 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         val msg = wsMessageField.text.trim()
         if (msg.isEmpty() || webSocket == null) return
         webSocket?.sendText(msg, true)?.thenRun {
-            appendWsEvent("发送", msg)
+            appendWsEvent(MyMessageBundle.message("debug.ws.event.sent"), msg)
             SwingUtilities.invokeLater { wsMessageField.text = "" }
         }
     }
@@ -1079,7 +1126,7 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         val bodySize = body.length
         val sizeText = if (bodySize > 1024) "${bodySize / 1024} KB" else "$bodySize B"
 
-        responseStatusLabel.text = "状态: $statusCode  |  耗时: ${elapsed}ms  |  大小: $sizeText"
+        responseStatusLabel.text = MyMessageBundle.message("debug.status.done", statusCode, elapsed, sizeText)
         responseStatusLabel.foreground = statusColor
 
         responseBodyArea.text = tryFormatJson(body)
@@ -1108,11 +1155,12 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                 entry.responseStatus in 300..399 -> WARN_COLOR
                 else -> ERROR_COLOR
             }
-            responseStatusLabel.text =
-                "状态: ${entry.responseStatus}  |  耗时: ${entry.elapsed}ms  |  大小: $sizeText  |  历史"
+            responseStatusLabel.text = MyMessageBundle.message(
+                "debug.history.status", entry.responseStatus, entry.elapsed, sizeText
+            )
             responseStatusLabel.foreground = statusColor
         } else {
-            responseStatusLabel.text = "历史: 请求未完成"
+            responseStatusLabel.text = MyMessageBundle.message("debug.history.incomplete")
             responseStatusLabel.foreground = ERROR_COLOR
         }
 
@@ -1150,7 +1198,10 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         override fun getRowCount() = data.size
         override fun getColumnCount() = 2
-        override fun getColumnName(column: Int) = if (column == 0) "名称" else "值"
+        override fun getColumnName(column: Int): String = if (column == 0)
+            MyMessageBundle.message("debug.response.column.name")
+        else
+            MyMessageBundle.message("debug.response.column.value")
         override fun getValueAt(rowIndex: Int, columnIndex: Int): Any =
             if (columnIndex == 0) data[rowIndex].first else data[rowIndex].second
     }

@@ -12,8 +12,10 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
+import io.github.movebrickschi.restfulall.MyMessageBundle
 import io.github.movebrickschi.restfulall.model.HttpMethod
 import io.github.movebrickschi.restfulall.model.RouteInfo
+import io.github.movebrickschi.restfulall.service.LanguageChangeListener
 import io.github.movebrickschi.restfulall.service.RouteService
 import java.awt.*
 import java.awt.event.KeyAdapter
@@ -36,16 +38,22 @@ class RouteListPanel(
     private val tableModel = RouteTableModel()
     private val table = JBTable(tableModel)
     private val statusLabel = JBLabel()
-    private val searchField = JBTextField().apply {
-        emptyText.text = "搜索接口..."
-    }
+    private val searchField = JBTextField()
+    private val refreshButton = JButton(AllIcons.Actions.Refresh)
+    private val debugCellRenderer = IconCellRenderer(AllIcons.Actions.Execute, "")
+    private val navCellRenderer = IconCellRenderer(AllIcons.Actions.EditSource, "")
 
     private val debounceTimer = Timer(150) { filterRoutes() }.apply { isRepeats = false }
 
     init {
         setupToolbar()
         setupTable()
+        applyI18n()
         loadRoutes()
+
+        ApplicationManager.getApplication().messageBus
+            .connect(project)
+            .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener { applyI18n() })
     }
 
     private fun setupToolbar() {
@@ -54,8 +62,7 @@ class RouteListPanel(
 
             add(searchField, BorderLayout.CENTER)
 
-            val refreshButton = JButton(AllIcons.Actions.Refresh).apply {
-                toolTipText = "刷新接口列表"
+            refreshButton.apply {
                 isBorderPainted = false
                 isContentAreaFilled = false
                 preferredSize = Dimension(28, 28)
@@ -113,13 +120,13 @@ class RouteListPanel(
                 preferredWidth = 32
                 maxWidth = 32
                 minWidth = 32
-                cellRenderer = IconCellRenderer(AllIcons.Actions.Execute, "在调试面板中打开")
+                cellRenderer = debugCellRenderer
             }
             columnModel.getColumn(COL_NAV).apply {
                 preferredWidth = 32
                 maxWidth = 32
                 minWidth = 32
-                cellRenderer = IconCellRenderer(AllIcons.Actions.EditSource, "跳转到源码")
+                cellRenderer = navCellRenderer
             }
         }
 
@@ -148,13 +155,52 @@ class RouteListPanel(
         add(statusLabel, BorderLayout.SOUTH)
     }
 
+    private fun applyI18n() {
+        searchField.emptyText.text = MyMessageBundle.message("route.list.search.placeholder")
+        refreshButton.toolTipText = MyMessageBundle.message("route.list.refresh.tooltip")
+        debugCellRenderer.tooltip = MyMessageBundle.message("route.list.icon.debug")
+        navCellRenderer.tooltip = MyMessageBundle.message("route.list.icon.navigate")
+        tableModel.fireTableStructureChanged()
+        table.columnModel.getColumn(COL_METHOD).apply {
+            preferredWidth = 70
+            maxWidth = 80
+            minWidth = 60
+            cellRenderer = MethodCellRenderer()
+        }
+        table.columnModel.getColumn(COL_DEBUG).apply {
+            preferredWidth = 32
+            maxWidth = 32
+            minWidth = 32
+            cellRenderer = debugCellRenderer
+        }
+        table.columnModel.getColumn(COL_NAV).apply {
+            preferredWidth = 32
+            maxWidth = 32
+            minWidth = 32
+            cellRenderer = navCellRenderer
+        }
+        updateStatusLabel()
+    }
+
+    private fun updateStatusLabel() {
+        val query = searchField.text.trim().lowercase()
+        statusLabel.text = if (query.isBlank()) {
+            if (filteredRoutes.isEmpty()) MyMessageBundle.message("route.list.empty")
+            else MyMessageBundle.message("route.list.count", filteredRoutes.size)
+        } else {
+            MyMessageBundle.message("route.list.matched", filteredRoutes.size, allRoutes.size)
+        }
+    }
+
     private fun loadRoutes() {
         val routeService = RouteService.getInstance(project)
         if (routeService.isInitialScanDone) {
             updateRoutes(routeService.getCachedRoutes())
         } else {
-            statusLabel.text = "暂无接口数据，请点击上方刷新按钮"
-            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "扫描路由...", true) {
+            statusLabel.text = MyMessageBundle.message("route.list.empty")
+            ProgressManager.getInstance().run(object : Task.Backgroundable(
+                project, MyMessageBundle.message("route.list.task.scanning"), true
+            ) {
                 override fun run(indicator: ProgressIndicator) {
                     indicator.isIndeterminate = true
                     routeService.scanProject()
@@ -173,8 +219,10 @@ class RouteListPanel(
         val routeService = RouteService.getInstance(project)
         if (routeService.isScanning) return
 
-        statusLabel.text = "扫描中..."
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "重新扫描路由...", true) {
+        statusLabel.text = MyMessageBundle.message("route.list.scanning")
+        ProgressManager.getInstance().run(object : Task.Backgroundable(
+            project, MyMessageBundle.message("route.list.task.rescanning"), true
+        ) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 routeService.scanProject()
@@ -188,7 +236,7 @@ class RouteListPanel(
 
             override fun onCancel() {
                 ApplicationManager.getApplication().invokeLater {
-                    statusLabel.text = "扫描已取消"
+                    statusLabel.text = MyMessageBundle.message("route.list.scan.cancelled")
                 }
             }
         })
@@ -212,12 +260,7 @@ class RouteListPanel(
 
         tableModel.fireTableDataChanged()
 
-        statusLabel.text = if (query.isBlank()) {
-            if (filteredRoutes.isEmpty()) "暂无接口数据，请点击上方刷新按钮"
-            else "共 ${filteredRoutes.size} 个接口"
-        } else {
-            "匹配 ${filteredRoutes.size} / ${allRoutes.size} 个接口"
-        }
+        updateStatusLabel()
 
         if (filteredRoutes.isNotEmpty()) {
             table.setRowSelectionInterval(0, 0)
@@ -232,8 +275,8 @@ class RouteListPanel(
         override fun getRowCount() = filteredRoutes.size
         override fun getColumnCount() = 4
         override fun getColumnName(column: Int) = when (column) {
-            COL_METHOD -> "方法"
-            COL_PATH -> "路径"
+            COL_METHOD -> MyMessageBundle.message("route.list.column.method")
+            COL_PATH -> MyMessageBundle.message("route.list.column.path")
             COL_DEBUG -> ""
             COL_NAV -> ""
             else -> ""
@@ -270,7 +313,7 @@ class RouteListPanel(
 
     private class IconCellRenderer(
         private val icon: Icon,
-        private val tooltip: String,
+        var tooltip: String,
     ) : DefaultTableCellRenderer() {
         override fun getTableCellRendererComponent(
             table: JTable, value: Any?, isSelected: Boolean,

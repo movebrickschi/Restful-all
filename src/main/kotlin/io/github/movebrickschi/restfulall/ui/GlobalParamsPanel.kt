@@ -1,14 +1,17 @@
 package io.github.movebrickschi.restfulall.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.util.ui.JBUI
+import io.github.movebrickschi.restfulall.MyMessageBundle
 import io.github.movebrickschi.restfulall.model.GlobalParamsData
 import io.github.movebrickschi.restfulall.model.ParamEntry
+import io.github.movebrickschi.restfulall.service.LanguageChangeListener
 import io.github.movebrickschi.restfulall.service.PluginSettingsState
 import java.awt.BorderLayout
 import java.awt.FlowLayout
@@ -23,10 +26,22 @@ class GlobalParamsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val bodyTextArea = JsonSyntaxTextPane(editable = true)
     private val tabs = JBTabbedPane()
 
+    private val hintLabel = JBLabel().apply {
+        font = font.deriveFont(11f)
+        foreground = JBColor.GRAY
+        border = JBUI.Borders.empty(4, 0, 0, 0)
+    }
+    private val buttonsToTranslate = mutableListOf<Pair<JButton, String>>()
+
     init {
         border = JBUI.Borders.empty(2, 4, 4, 4)
         loadFromState()
         setupUI()
+        applyI18n()
+
+        ApplicationManager.getApplication().messageBus
+            .connect(project)
+            .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener { applyI18n() })
     }
 
     private fun setupUI() {
@@ -37,33 +52,37 @@ class GlobalParamsPanel(private val project: Project) : JPanel(BorderLayout()) {
             addTab("Cookies", wrapWithTopButtons(cookiesPanel) { clearCookiesPanel() })
         }
         add(tabs, BorderLayout.CENTER)
-
-        val hintLabel = JBLabel("提示: 全局参数会自动追加到每次请求中，局部参数中同名的参数会覆盖全局参数").apply {
-            font = font.deriveFont(11f)
-            foreground = JBColor.GRAY
-            border = JBUI.Borders.empty(4, 0, 0, 0)
-        }
         add(hintLabel, BorderLayout.SOUTH)
+    }
+
+    private fun applyI18n() {
+        hintLabel.text = MyMessageBundle.message("global.params.hint")
+        for ((btn, key) in buttonsToTranslate) {
+            btn.toolTipText = MyMessageBundle.message(key)
+        }
+        queryPanel.refreshColumnHeaders()
+        headersPanel.refreshColumnHeaders()
+        cookiesPanel.refreshColumnHeaders()
     }
 
     private fun createTopButtons(onClear: () -> Unit): JPanel {
         return JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
             val saveButton = JButton(AllIcons.Actions.MenuSaveall).apply {
-                toolTipText = "保存"
                 isBorderPainted = false
                 isContentAreaFilled = false
                 preferredSize = java.awt.Dimension(28, 28)
                 addActionListener { saveToState() }
             }
+            buttonsToTranslate.add(saveButton to "global.params.save.tooltip")
             add(saveButton)
 
             val clearButton = JButton(AllIcons.Actions.GC).apply {
-                toolTipText = "清空"
                 isBorderPainted = false
                 isContentAreaFilled = false
                 preferredSize = java.awt.Dimension(28, 28)
                 addActionListener { onClear(); saveToState() }
             }
+            buttonsToTranslate.add(clearButton to "global.params.clear.tooltip")
             add(clearButton)
         }
     }
@@ -81,25 +100,24 @@ class GlobalParamsPanel(private val project: Project) : JPanel(BorderLayout()) {
         val toolbar = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0))
 
         val saveButton = JButton(AllIcons.Actions.MenuSaveall).apply {
-            toolTipText = "保存"
             isBorderPainted = false
             isContentAreaFilled = false
             preferredSize = java.awt.Dimension(28, 28)
             addActionListener { saveToState() }
         }
+        buttonsToTranslate.add(saveButton to "global.params.save.tooltip")
         toolbar.add(saveButton)
 
         val clearButton = JButton(AllIcons.Actions.GC).apply {
-            toolTipText = "清空"
             isBorderPainted = false
             isContentAreaFilled = false
             preferredSize = java.awt.Dimension(28, 28)
             addActionListener { bodyTextArea.text = ""; saveToState() }
         }
+        buttonsToTranslate.add(clearButton to "global.params.clear.tooltip")
         toolbar.add(clearButton)
 
         val formatButton = JButton(AllIcons.Actions.ReformatCode).apply {
-            toolTipText = "格式化 JSON"
             isBorderPainted = false
             isContentAreaFilled = false
             preferredSize = java.awt.Dimension(28, 28)
@@ -111,6 +129,7 @@ class GlobalParamsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 }
             }
         }
+        buttonsToTranslate.add(formatButton to "global.params.format.json.tooltip")
         toolbar.add(formatButton)
 
         panel.add(toolbar, BorderLayout.NORTH)

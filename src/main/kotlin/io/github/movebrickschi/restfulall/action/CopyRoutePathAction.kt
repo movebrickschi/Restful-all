@@ -4,6 +4,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.ide.CopyPasteManager
+import io.github.movebrickschi.restfulall.MyMessageBundle
 import io.github.movebrickschi.restfulall.service.RouteService
 import java.awt.datatransfer.StringSelection
 
@@ -21,7 +22,7 @@ class CopyRoutePathAction : AnAction() {
         if (route != null) {
             CopyPasteManager.getInstance().setContents(StringSelection(route.displayPath))
             val statusBar = com.intellij.openapi.wm.WindowManager.getInstance().getStatusBar(project)
-            statusBar?.info = "已复制路由: ${route.displayPath}"
+            statusBar?.info = MyMessageBundle.message("copy.route.status.copied", route.displayPath)
         }
     }
 

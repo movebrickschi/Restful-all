@@ -7,6 +7,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
+import io.github.movebrickschi.restfulall.MyMessageBundle
 import io.github.movebrickschi.restfulall.service.RouteService
 import io.github.movebrickschi.restfulall.ui.RouteSearchPopup
 
@@ -23,7 +24,9 @@ class SearchRouteAction : AnAction() {
             val routes = routeService.getCachedRoutes()
             RouteSearchPopup(project, routes, selectedText).show()
         } else {
-            ProgressManager.getInstance().run(object : Task.Backgroundable(project, "首次扫描路由...", true) {
+            ProgressManager.getInstance().run(object : Task.Backgroundable(
+                project, MyMessageBundle.message("route.list.task.first.scan"), true
+            ) {
                 override fun run(indicator: ProgressIndicator) {
                     indicator.isIndeterminate = true
                     routeService.scanProject()

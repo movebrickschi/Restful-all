@@ -1,5 +1,6 @@
 package io.github.movebrickschi.restfulall.service
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
@@ -19,12 +20,14 @@ class PluginSettingsState : PersistentStateComponent<PluginSettingsState.State> 
         var baseUrls: MutableList<BaseUrlEntry> = mutableListOf(),
         var globalParams: GlobalParamsData = GlobalParamsData(),
         var requestHistory: MutableList<RequestHistoryEntry> = mutableListOf(),
+        var language: String = ApplicationLanguageHolder.LANG_AUTO,
     )
 
     override fun getState(): State = myState
 
     override fun loadState(state: State) {
         myState = state
+        ApplicationLanguageHolder.set(myState.language)
     }
 
     fun getBaseUrls(): MutableList<BaseUrlEntry> = myState.baseUrls
@@ -62,6 +65,22 @@ class PluginSettingsState : PersistentStateComponent<PluginSettingsState.State> 
         return urls.find { it.moduleName == moduleName }
             ?: urls.find { it.moduleName.isBlank() }
             ?: if (urls.size == 1) urls.first() else null
+    }
+
+    fun getLanguage(): String = myState.language
+
+    fun setLanguage(language: String) {
+        val normalized = when (language.uppercase()) {
+            ApplicationLanguageHolder.LANG_ZH_CN -> ApplicationLanguageHolder.LANG_ZH_CN
+            ApplicationLanguageHolder.LANG_EN    -> ApplicationLanguageHolder.LANG_EN
+            else                                 -> ApplicationLanguageHolder.LANG_AUTO
+        }
+        if (normalized == myState.language) return
+        myState.language = normalized
+        ApplicationLanguageHolder.set(normalized)
+        ApplicationManager.getApplication().messageBus
+            .syncPublisher(LanguageChangeListener.TOPIC)
+            .languageChanged(normalized)
     }
 
     companion object {

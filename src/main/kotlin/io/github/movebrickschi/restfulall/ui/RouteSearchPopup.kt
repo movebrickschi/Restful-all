@@ -12,6 +12,7 @@ import com.intellij.ui.ColoredListCellRenderer
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBTextField
+import io.github.movebrickschi.restfulall.MyMessageBundle
 import io.github.movebrickschi.restfulall.model.HttpMethod
 import io.github.movebrickschi.restfulall.model.RouteInfo
 import io.github.movebrickschi.restfulall.service.RouteService
@@ -35,11 +36,11 @@ class RouteSearchPopup(
     private val routeList = JBList(listModel)
     private val searchField = JBTextField()
     private val statusLabel = JLabel()
-    private val refreshLabel = JLabel("↻ 刷新").apply {
+    private val refreshLabel = JLabel(MyMessageBundle.message("route.search.refresh")).apply {
         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
         foreground = java.awt.Color(0x58, 0x9D, 0xF6)
         font = font.deriveFont(11f)
-        toolTipText = "重新扫描项目路由 (F5)"
+        toolTipText = MyMessageBundle.message("route.search.refresh.tooltip")
     }
     private var popup: JBPopup? = null
     private val debounceTimer = Timer(DEBOUNCE_MS) { updateList(searchField.text) }.apply {
@@ -57,7 +58,7 @@ class RouteSearchPopup(
 
     private fun setupUI() {
         searchField.putClientProperty("JTextField.Search.Icon", true)
-        searchField.emptyText.text = "输入路由路径进行搜索... (例: /v1/action)"
+        searchField.emptyText.text = MyMessageBundle.message("route.search.placeholder")
 
         searchField.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent) = onSearchChanged()
@@ -113,10 +114,12 @@ class RouteSearchPopup(
         val routeService = RouteService.getInstance(project)
         if (routeService.isScanning) return
 
-        refreshLabel.text = "⏳ 扫描中..."
+        refreshLabel.text = MyMessageBundle.message("route.search.refresh.scanning")
         refreshLabel.isEnabled = false
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "重新扫描路由...", true) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(
+            project, MyMessageBundle.message("route.list.task.rescanning"), true
+        ) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 routeService.scanProject()
@@ -126,14 +129,14 @@ class RouteSearchPopup(
                 ApplicationManager.getApplication().invokeLater {
                     allRoutes = routeService.getCachedRoutes()
                     updateList(searchField.text)
-                    refreshLabel.text = "↻ 刷新"
+                    refreshLabel.text = MyMessageBundle.message("route.search.refresh")
                     refreshLabel.isEnabled = true
                 }
             }
 
             override fun onCancel() {
                 ApplicationManager.getApplication().invokeLater {
-                    refreshLabel.text = "↻ 刷新"
+                    refreshLabel.text = MyMessageBundle.message("route.search.refresh")
                     refreshLabel.isEnabled = true
                 }
             }
@@ -171,9 +174,9 @@ class RouteSearchPopup(
         }
 
         statusLabel.text = if (totalMatched > MAX_VISIBLE_ITEMS) {
-            "  显示前 $MAX_VISIBLE_ITEMS 条 (共 $totalMatched 条匹配, 总计 ${allRoutes.size} 条)"
+            MyMessageBundle.message("route.search.status.matched", MAX_VISIBLE_ITEMS, totalMatched, allRoutes.size)
         } else {
-            "  共 $totalMatched 条路由 (总计 ${allRoutes.size} 条)"
+            MyMessageBundle.message("route.search.status.total", totalMatched, allRoutes.size)
         }
     }
 
@@ -207,7 +210,7 @@ class RouteSearchPopup(
 
         popup = JBPopupFactory.getInstance()
             .createComponentPopupBuilder(panel, searchField)
-            .setTitle("Restful-all: 搜索路由")
+            .setTitle(MyMessageBundle.message("route.search.popup.title"))
             .setMovable(true)
             .setResizable(true)
             .setRequestFocus(true)

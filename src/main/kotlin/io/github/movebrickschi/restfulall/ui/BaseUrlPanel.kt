@@ -1,13 +1,16 @@
 package io.github.movebrickschi.restfulall.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
+import io.github.movebrickschi.restfulall.MyMessageBundle
 import io.github.movebrickschi.restfulall.model.BaseUrlEntry
+import io.github.movebrickschi.restfulall.service.LanguageChangeListener
 import io.github.movebrickschi.restfulall.service.PluginSettingsState
 import io.github.movebrickschi.restfulall.service.RouteService
 import java.awt.BorderLayout
@@ -29,25 +32,36 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val tableModel = BaseUrlTableModel()
     private val table = JBTable(tableModel)
 
+    private val titleLabel = JBLabel().apply { font = font.deriveFont(Font.BOLD, 13f) }
+    private val detectButton = JButton(AllIcons.Actions.Find)
+    private val addButton = JButton(AllIcons.General.Add)
+    private val removeButton = JButton(AllIcons.General.Remove)
+    private val saveButton = JButton(AllIcons.Actions.MenuSaveall)
+    private val hintLabel = JBLabel().apply {
+        font = font.deriveFont(11f)
+        foreground = JBColor.GRAY
+        border = JBUI.Borders.empty(4, 0, 0, 0)
+    }
+
     init {
         border = JBUI.Borders.empty(2, 4, 4, 4)
         loadFromState()
         setupUI()
+        applyI18n()
+
+        ApplicationManager.getApplication().messageBus
+            .connect(project)
+            .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener { applyI18n() })
     }
 
     private fun setupUI() {
         val toolbar = JPanel(BorderLayout(2, 0)).apply {
             border = JBUI.Borders.empty(2, 0, 4, 0)
-
-            val titleLabel = JBLabel("前置 URL").apply {
-                font = font.deriveFont(Font.BOLD, 13f)
-            }
             add(titleLabel, BorderLayout.WEST)
 
             val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0))
 
-            val detectButton = JButton(AllIcons.Actions.Find).apply {
-                toolTipText = "自动检测模块"
+            detectButton.apply {
                 isBorderPainted = false
                 isContentAreaFilled = false
                 preferredSize = Dimension(28, 28)
@@ -55,8 +69,7 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
             buttonPanel.add(detectButton)
 
-            val addButton = JButton(AllIcons.General.Add).apply {
-                toolTipText = "添加"
+            addButton.apply {
                 isBorderPainted = false
                 isContentAreaFilled = false
                 preferredSize = Dimension(28, 28)
@@ -64,8 +77,7 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
             buttonPanel.add(addButton)
 
-            val removeButton = JButton(AllIcons.General.Remove).apply {
-                toolTipText = "删除选中行"
+            removeButton.apply {
                 isBorderPainted = false
                 isContentAreaFilled = false
                 preferredSize = Dimension(28, 28)
@@ -73,8 +85,7 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
             buttonPanel.add(removeButton)
 
-            val saveButton = JButton(AllIcons.Actions.MenuSaveall).apply {
-                toolTipText = "保存"
+            saveButton.apply {
                 isBorderPainted = false
                 isContentAreaFilled = false
                 preferredSize = Dimension(28, 28)
@@ -96,7 +107,6 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
             columnModel.getColumn(COL_TYPE).apply {
                 preferredWidth = 100
                 maxWidth = 120
-                cellEditor = DefaultCellEditor(JComboBox(arrayOf("自动识别", "手动指定")))
             }
             columnModel.getColumn(COL_SERVER).preferredWidth = 120
             columnModel.getColumn(COL_PORT).apply {
@@ -115,6 +125,7 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
                 cellRenderer = DeleteCellRenderer()
             }
         }
+        refreshTypeEditor()
 
         table.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
@@ -130,13 +141,46 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
         })
 
         add(JBScrollPane(table), BorderLayout.CENTER)
-
-        val hintLabel = JBLabel("提示: 前置 URL 会自动拼接到路由路径前面。模块名留空则作为默认配置，多模块项目可按模块分别配置").apply {
-            font = font.deriveFont(11f)
-            foreground = JBColor.GRAY
-            border = JBUI.Borders.empty(4, 0, 0, 0)
-        }
         add(hintLabel, BorderLayout.SOUTH)
+    }
+
+    private fun applyI18n() {
+        titleLabel.text = MyMessageBundle.message("base.url.title")
+        detectButton.toolTipText = MyMessageBundle.message("base.url.detect.tooltip")
+        addButton.toolTipText = MyMessageBundle.message("base.url.add.tooltip")
+        removeButton.toolTipText = MyMessageBundle.message("base.url.remove.tooltip")
+        saveButton.toolTipText = MyMessageBundle.message("base.url.save.tooltip")
+        hintLabel.text = MyMessageBundle.message("base.url.hint")
+        refreshTypeEditor()
+        tableModel.fireTableStructureChanged()
+        table.columnModel.getColumn(COL_MODULE).preferredWidth = 160
+        table.columnModel.getColumn(COL_TYPE).apply {
+            preferredWidth = 100
+            maxWidth = 120
+        }
+        table.columnModel.getColumn(COL_SERVER).preferredWidth = 120
+        table.columnModel.getColumn(COL_PORT).apply {
+            preferredWidth = 70
+            maxWidth = 80
+        }
+        table.columnModel.getColumn(COL_CONTEXT_PATH).preferredWidth = 120
+        table.columnModel.getColumn(COL_PREVIEW).apply {
+            preferredWidth = 200
+            cellRenderer = PreviewCellRenderer()
+        }
+        table.columnModel.getColumn(COL_DELETE).apply {
+            preferredWidth = 32
+            maxWidth = 32
+            minWidth = 32
+            cellRenderer = DeleteCellRenderer()
+        }
+    }
+
+    private fun refreshTypeEditor() {
+        val autoLabel = MyMessageBundle.message("base.url.type.auto")
+        val manualLabel = MyMessageBundle.message("base.url.type.manual")
+        table.columnModel.getColumn(COL_TYPE).cellEditor =
+            DefaultCellEditor(JComboBox(arrayOf(autoLabel, manualLabel)))
     }
 
     private fun loadFromState() {
@@ -264,12 +308,12 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
         override fun getRowCount() = entries.size
         override fun getColumnCount() = 7
         override fun getColumnName(column: Int) = when (column) {
-            COL_MODULE -> "模块"
-            COL_TYPE -> "类型"
-            COL_SERVER -> "服务器"
-            COL_PORT -> "端口"
-            COL_CONTEXT_PATH -> "项目路径"
-            COL_PREVIEW -> "预览"
+            COL_MODULE -> MyMessageBundle.message("base.url.column.module")
+            COL_TYPE -> MyMessageBundle.message("base.url.column.type")
+            COL_SERVER -> MyMessageBundle.message("base.url.column.server")
+            COL_PORT -> MyMessageBundle.message("base.url.column.port")
+            COL_CONTEXT_PATH -> MyMessageBundle.message("base.url.column.context.path")
+            COL_PREVIEW -> MyMessageBundle.message("base.url.column.preview")
             COL_DELETE -> ""
             else -> ""
         }
@@ -281,7 +325,10 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
             val entry = entries[rowIndex]
             return when (columnIndex) {
                 COL_MODULE -> entry.moduleName
-                COL_TYPE -> if (entry.type == BaseUrlEntry.TYPE_AUTO) "自动识别" else "手动指定"
+                COL_TYPE -> if (entry.type == BaseUrlEntry.TYPE_AUTO)
+                    MyMessageBundle.message("base.url.type.auto")
+                else
+                    MyMessageBundle.message("base.url.type.manual")
                 COL_SERVER -> entry.server
                 COL_PORT -> entry.port
                 COL_CONTEXT_PATH -> entry.contextPath
@@ -295,7 +342,10 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
             val entry = entries[rowIndex]
             when (columnIndex) {
                 COL_MODULE -> entry.moduleName = aValue as? String ?: ""
-                COL_TYPE -> entry.type = if (aValue == "自动识别") BaseUrlEntry.TYPE_AUTO else BaseUrlEntry.TYPE_MANUAL
+                COL_TYPE -> entry.type = if (aValue == MyMessageBundle.message("base.url.type.auto"))
+                    BaseUrlEntry.TYPE_AUTO
+                else
+                    BaseUrlEntry.TYPE_MANUAL
                 COL_SERVER -> entry.server = aValue as? String ?: "127.0.0.1"
                 COL_PORT -> entry.port = (aValue as? String)?.toIntOrNull() ?: (aValue as? Int) ?: 8080
                 COL_CONTEXT_PATH -> entry.contextPath = aValue as? String ?: ""

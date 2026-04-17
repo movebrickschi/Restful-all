@@ -1,12 +1,15 @@
 package io.github.movebrickschi.restfulall.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
+import io.github.movebrickschi.restfulall.MyMessageBundle
 import io.github.movebrickschi.restfulall.model.HttpMethod
 import io.github.movebrickschi.restfulall.model.RequestHistoryEntry
+import io.github.movebrickschi.restfulall.service.LanguageChangeListener
 import io.github.movebrickschi.restfulall.service.PluginSettingsState
 import java.awt.BorderLayout
 import java.awt.Color
@@ -24,10 +27,8 @@ import javax.swing.tree.DefaultTreeModel
 
 class RequestHistoryPanel(private val project: Project) : JPanel(BorderLayout()) {
 
-    private val searchField = JBTextField().apply {
-        emptyText.text = "搜索历史记录..."
-    }
-    private val treeModel = DefaultTreeModel(DefaultMutableTreeNode("历史"))
+    private val searchField = JBTextField()
+    private val treeModel = DefaultTreeModel(DefaultMutableTreeNode(MyMessageBundle.message("request.history.root")))
     private val historyTree = JTree(treeModel)
 
     private var allEntries = mutableListOf<RequestHistoryEntry>()
@@ -36,11 +37,19 @@ class RequestHistoryPanel(private val project: Project) : JPanel(BorderLayout())
     private var onLoadToDebug: ((RequestHistoryEntry) -> Unit)? = null
     private val debounceTimer = Timer(150) { rebuildTree() }.apply { isRepeats = false }
 
+    private val refreshButton = JButton(AllIcons.Actions.Refresh)
+    private val clearButton = JButton(AllIcons.Actions.GC)
+
     init {
         border = JBUI.Borders.empty(2, 4, 4, 4)
         loadFromState()
         setupUI()
+        applyI18n()
         rebuildTree()
+
+        ApplicationManager.getApplication().messageBus
+            .connect(project)
+            .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener { applyI18n() })
     }
 
     fun setOnLoadToDebug(callback: (RequestHistoryEntry) -> Unit) {
@@ -55,8 +64,7 @@ class RequestHistoryPanel(private val project: Project) : JPanel(BorderLayout())
 
             val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0))
 
-            val refreshButton = JButton(AllIcons.Actions.Refresh).apply {
-                toolTipText = "刷新"
+            refreshButton.apply {
                 isBorderPainted = false
                 isContentAreaFilled = false
                 preferredSize = Dimension(28, 28)
@@ -64,8 +72,7 @@ class RequestHistoryPanel(private val project: Project) : JPanel(BorderLayout())
             }
             buttonPanel.add(refreshButton)
 
-            val clearButton = JButton(AllIcons.Actions.GC).apply {
-                toolTipText = "清空历史"
+            clearButton.apply {
                 isBorderPainted = false
                 isContentAreaFilled = false
                 preferredSize = Dimension(28, 28)
@@ -100,6 +107,13 @@ class RequestHistoryPanel(private val project: Project) : JPanel(BorderLayout())
         add(JBScrollPane(historyTree), BorderLayout.CENTER)
     }
 
+    private fun applyI18n() {
+        searchField.emptyText.text = MyMessageBundle.message("request.history.search.placeholder")
+        refreshButton.toolTipText = MyMessageBundle.message("request.history.refresh.tooltip")
+        clearButton.toolTipText = MyMessageBundle.message("request.history.clear.tooltip")
+        rebuildTree()
+    }
+
     private fun loadFromState() {
         val state = PluginSettingsState.getInstance(project)
         allEntries = state.getRequestHistory().toMutableList()
@@ -120,10 +134,12 @@ class RequestHistoryPanel(private val project: Project) : JPanel(BorderLayout())
             }.toMutableList()
         }
 
-        val root = DefaultMutableTreeNode("历史")
+        val root = DefaultMutableTreeNode(MyMessageBundle.message("request.history.root"))
         val grouped = filteredEntries.groupBy { it.displayDate() }
         for ((date, entries) in grouped) {
-            val dateNode = DefaultMutableTreeNode("$date (${entries.size})")
+            val dateNode = DefaultMutableTreeNode(
+                MyMessageBundle.message("request.history.group.title", date, entries.size)
+            )
             for (entry in entries) {
                 dateNode.add(DefaultMutableTreeNode(entry))
             }

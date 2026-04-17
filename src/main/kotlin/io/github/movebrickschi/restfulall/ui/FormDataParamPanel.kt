@@ -4,6 +4,7 @@ import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
+import io.github.movebrickschi.restfulall.MyMessageBundle
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Cursor
@@ -63,6 +64,24 @@ class FormDataParamPanel : JPanel(BorderLayout()) {
         add(JBScrollPane(table), BorderLayout.CENTER)
     }
 
+    fun refreshColumnHeaders() {
+        tableModel.fireTableStructureChanged()
+        table.columnModel.getColumn(COL_ENABLED).apply {
+            preferredWidth = 32; maxWidth = 32; minWidth = 32
+        }
+        table.columnModel.getColumn(COL_NAME).preferredWidth = 150
+        table.columnModel.getColumn(COL_VALUE).preferredWidth = 200
+        table.columnModel.getColumn(COL_TYPE).apply {
+            preferredWidth = 80
+            maxWidth = 100
+            cellEditor = DefaultCellEditor(JComboBox(arrayOf("text", "file")))
+        }
+        table.columnModel.getColumn(COL_DELETE).apply {
+            preferredWidth = 32; maxWidth = 32; minWidth = 32
+            cellRenderer = DeleteCellRenderer()
+        }
+    }
+
     private fun chooseFile(row: Int) {
         val descriptor = FileChooserDescriptor(true, false, false, false, false, false)
         val file = FileChooser.chooseFile(descriptor, null, null)
@@ -106,9 +125,9 @@ class FormDataParamPanel : JPanel(BorderLayout()) {
         override fun getColumnCount() = 5
         override fun getColumnName(column: Int) = when (column) {
             COL_ENABLED -> ""
-            COL_NAME -> "参数名"
-            COL_VALUE -> "参数值"
-            COL_TYPE -> "参数类型"
+            COL_NAME -> MyMessageBundle.message("param.table.column.name")
+            COL_VALUE -> MyMessageBundle.message("param.table.column.value")
+            COL_TYPE -> MyMessageBundle.message("param.table.column.type")
             COL_DELETE -> ""
             else -> ""
         }

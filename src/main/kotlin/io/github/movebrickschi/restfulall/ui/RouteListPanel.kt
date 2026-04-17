@@ -132,7 +132,7 @@ class RouteListPanel(
                 when {
                     col == COL_DEBUG -> onDebugRoute(filteredRoutes[row])
                     col == COL_NAV -> navigateToSource(filteredRoutes[row])
-                    e.clickCount == 2 -> navigateToSource(filteredRoutes[row])
+                    e.clickCount == 2 -> onDebugRoute(filteredRoutes[row])
                 }
             }
         })

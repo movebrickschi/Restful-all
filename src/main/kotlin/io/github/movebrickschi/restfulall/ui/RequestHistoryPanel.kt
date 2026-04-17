@@ -89,6 +89,7 @@ class RequestHistoryPanel(private val project: Project) : JPanel(BorderLayout())
 
         historyTree.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
+                if (e.clickCount < 2) return
                 val path = historyTree.getPathForLocation(e.x, e.y) ?: return
                 val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return
                 val entry = node.userObject as? RequestHistoryEntry ?: return
@@ -154,13 +155,13 @@ class RequestHistoryPanel(private val project: Project) : JPanel(BorderLayout())
             val entry = node.userObject
 
             if (entry is RequestHistoryEntry) {
-                val methodColor = HttpMethod.fromString(entry.method)?.color ?: Color.GRAY
-                text = "<html><b style='color:rgb(${methodColor.red},${methodColor.green},${methodColor.blue})'>${entry.method}</b> ${entry.displayUrl()} <span style='color:gray'>${entry.displayTime()}</span></html>"
+                val mc = HttpMethod.fromString(entry.method)?.color ?: Color.GRAY
+                text = "<html><b style='color:rgb(${mc.red},${mc.green},${mc.blue})'>" +
+                    "${entry.method}</b> ${entry.displayUrl()}</html>"
                 icon = AllIcons.Nodes.Method
             } else if (entry is String) {
                 icon = AllIcons.Nodes.Folder
             }
-
             return comp
         }
     }

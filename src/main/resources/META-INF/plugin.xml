@@ -42,6 +42,7 @@
 
     <depends>com.intellij.modules.compose</depends>
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
 
     <resource-bundle>messages.MyMessageBundle</resource-bundle>
 

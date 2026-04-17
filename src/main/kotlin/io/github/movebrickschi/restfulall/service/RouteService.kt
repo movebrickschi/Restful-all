@@ -1,6 +1,7 @@
 package io.github.movebrickschi.restfulall.service
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
@@ -62,17 +63,33 @@ class RouteService(private val project: Project) : Disposable {
                         }
                     }
 
+                    // Handle deletions synchronously (no I/O, just map removals)
                     var changed = false
                     for (path in deletedPaths) {
                         if (routesByFile.remove(path) != null) changed = true
                     }
-                    for (file in affectedFiles) {
-                        if (file.isDirectory || !shouldScan(file)) continue
-                        val newRoutes = scanSingleFile(file)
-                        val old = routesByFile.put(file.path, newRoutes)
-                        if (old != newRoutes) changed = true
+
+                    val filesToRescan = affectedFiles.filter { !it.isDirectory && shouldScan(it) }
+
+                    if (filesToRescan.isEmpty()) {
+                        if (changed) rebuildSortedCache()
+                        return
                     }
-                    if (changed) rebuildSortedCache()
+
+                    // Defer file scanning to pooled thread to avoid blocking EDT
+                    val deletionChanged = changed
+                    ApplicationManager.getApplication().executeOnPooledThread {
+                        var fileChanged = deletionChanged
+                        for (file in filesToRescan) {
+                            if (!file.isValid) continue
+                            ReadAction.run<Throwable> {
+                                val newRoutes = scanSingleFile(file)
+                                val old = routesByFile.put(file.path, newRoutes)
+                                if (old != newRoutes) fileChanged = true
+                            }
+                        }
+                        if (fileChanged) rebuildSortedCache()
+                    }
                 }
             }
         )
@@ -90,34 +107,42 @@ class RouteService(private val project: Project) : Disposable {
         try {
             val newRoutesByFile = ConcurrentHashMap<String, List<RouteInfo>>()
 
+            // Phase 1: Collect files to scan (short read action, no file I/O)
+            val filesToScan = mutableListOf<VirtualFile>()
             ReadAction.run<Throwable> {
-                var totalFiles = 0
-                var scannedFiles = 0
-
                 val fileIndex = ProjectFileIndex.getInstance(project)
                 fileIndex.iterateContent { file ->
-                    totalFiles++
                     if (!file.isDirectory && shouldScan(file)) {
-                        scannedFiles++
-                        val routes = scanSingleFile(file)
-                        if (routes.isNotEmpty()) {
-                            newRoutesByFile[file.path] = routes
-                        }
+                        filesToScan.add(file)
                     }
                     true
                 }
+            }
 
-                LOG.info("ProjectFileIndex: iterated $totalFiles files, scanned $scannedFiles matching files")
+            LOG.info("ProjectFileIndex: found ${filesToScan.size} files to scan")
 
-                if (scannedFiles == 0) {
-                    LOG.info("ProjectFileIndex found 0 scannable files, falling back to VFS recursive scan...")
+            // Fallback if no files found via ProjectFileIndex
+            if (filesToScan.isEmpty()) {
+                LOG.info("ProjectFileIndex found 0 scannable files, falling back to VFS recursive scan...")
+                ReadAction.run<Throwable> {
                     val baseDir = project.basePath?.let {
                         LocalFileSystem.getInstance().findFileByPath(it)
                     }
                     if (baseDir != null) {
-                        scanDirectoryRecursively(baseDir, newRoutesByFile)
+                        collectFilesRecursively(baseDir, filesToScan)
                     } else {
                         LOG.warn("Cannot determine project base directory for VFS fallback")
+                    }
+                }
+            }
+
+            // Phase 2: Scan each file with a per-file short ReadAction
+            for (file in filesToScan) {
+                if (!file.isValid) continue
+                ReadAction.run<Throwable> {
+                    val routes = scanSingleFile(file)
+                    if (routes.isNotEmpty()) {
+                        newRoutesByFile[file.path] = routes
                     }
                 }
             }
@@ -150,8 +175,10 @@ class RouteService(private val project: Project) : Disposable {
             if (routesByFile.remove(file.path) != null) rebuildSortedCache()
             return
         }
-        val routes = scanSingleFile(file)
-        routesByFile[file.path] = routes
+        ReadAction.run<Throwable> {
+            val routes = scanSingleFile(file)
+            routesByFile[file.path] = routes
+        }
         rebuildSortedCache()
     }
 
@@ -181,18 +208,15 @@ class RouteService(private val project: Project) : Disposable {
         }
     }
 
-    private fun scanDirectoryRecursively(dir: VirtualFile, result: ConcurrentHashMap<String, List<RouteInfo>>) {
+    private fun collectFilesRecursively(dir: VirtualFile, result: MutableList<VirtualFile>) {
         val children = dir.children ?: return
         for (child in children) {
             if (child.isDirectory) {
                 if (child.name !in SKIP_DIRECTORIES) {
-                    scanDirectoryRecursively(child, result)
+                    collectFilesRecursively(child, result)
                 }
             } else if (shouldScan(child)) {
-                val routes = scanSingleFile(child)
-                if (routes.isNotEmpty()) {
-                    result[child.path] = routes
-                }
+                result.add(child)
             }
         }
     }

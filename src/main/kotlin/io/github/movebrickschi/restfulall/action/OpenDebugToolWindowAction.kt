@@ -8,8 +8,12 @@ class OpenDebugToolWindowAction : AnAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
-        toolWindow?.show()
+        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID) ?: return
+        if (toolWindow.isVisible) {
+            toolWindow.hide()
+        } else {
+            toolWindow.show()
+        }
     }
 
     override fun update(e: AnActionEvent) {

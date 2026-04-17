@@ -1,7 +1,7 @@
 package io.github.movebrickschi.restfulall.ui
 
 import com.intellij.openapi.fileChooser.FileChooser
-import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
 import java.awt.BorderLayout
@@ -64,7 +64,7 @@ class FormDataParamPanel : JPanel(BorderLayout()) {
     }
 
     private fun chooseFile(row: Int) {
-        val descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor()
+        val descriptor = FileChooserDescriptor(true, false, false, false, false, false)
         val file = FileChooser.chooseFile(descriptor, null, null)
         if (file != null) {
             params[row].value = file.path

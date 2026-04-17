@@ -6,14 +6,12 @@ import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
-import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
 import io.github.movebrickschi.restfulall.model.GlobalParamsData
 import io.github.movebrickschi.restfulall.model.ParamEntry
 import io.github.movebrickschi.restfulall.service.PluginSettingsState
 import java.awt.BorderLayout
 import java.awt.FlowLayout
-import java.awt.Font
 import javax.swing.JButton
 import javax.swing.JPanel
 
@@ -22,12 +20,7 @@ class GlobalParamsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val queryPanel = ParamTablePanel()
     private val headersPanel = ParamTablePanel()
     private val cookiesPanel = ParamTablePanel()
-    private val bodyTextArea = JBTextArea().apply {
-        rows = 6
-        lineWrap = true
-        wrapStyleWord = true
-        font = Font("Monospaced", Font.PLAIN, 12)
-    }
+    private val bodyTextArea = JsonSyntaxTextPane(editable = true)
     private val tabs = JBTabbedPane()
 
     init {

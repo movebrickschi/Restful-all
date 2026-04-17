@@ -3,8 +3,6 @@ package io.github.movebrickschi.restfulall
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
-import com.intellij.openapi.wm.ToolWindowManager
-import com.intellij.openapi.wm.ex.ToolWindowManagerListener
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.content.ContentManagerEvent
 import com.intellij.ui.content.ContentManagerListener
@@ -60,29 +58,6 @@ class MyToolWindowFactory : ToolWindowFactory {
 
         routesWrapper.attach(mainPanel)
         mainPanel.showRoutes()
-
-        project.messageBus.connect(toolWindow.contentManager).subscribe(
-            ToolWindowManagerListener.TOPIC,
-            object : ToolWindowManagerListener {
-                override fun toolWindowShown(tw: ToolWindow) {
-                    if (tw.id == toolWindow.id) {
-                        // Restful-all 被激活时，隐藏其他可见的工具窗口
-                        val manager = ToolWindowManager.getInstance(project)
-                        for (id in manager.toolWindowIds) {
-                            if (id != toolWindow.id) {
-                                val other = manager.getToolWindow(id)
-                                if (other != null && other.isVisible) {
-                                    other.hide()
-                                }
-                            }
-                        }
-                    } else if (toolWindow.isVisible) {
-                        // 其他工具窗口被激活时，隐藏 Restful-all
-                        toolWindow.hide()
-                    }
-                }
-            }
-        )
     }
 }
 

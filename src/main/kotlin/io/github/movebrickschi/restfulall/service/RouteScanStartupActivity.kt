@@ -3,13 +3,17 @@ package io.github.movebrickschi.restfulall.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class RouteScanStartupActivity : ProjectActivity {
 
     override suspend fun execute(project: Project) {
         LOG.info("Starting initial route scan for project: ${project.name}")
         val service = RouteService.getInstance(project)
-        service.scanProject()
+        withContext(Dispatchers.IO) {
+            service.scanProject()
+        }
         LOG.info("Initial route scan completed for project: ${project.name}")
     }
 

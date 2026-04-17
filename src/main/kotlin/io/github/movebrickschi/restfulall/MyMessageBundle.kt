@@ -16,6 +16,10 @@ internal object MyMessageBundle {
     private val instance = DynamicBundle(MyMessageBundle::class.java, BUNDLE)
     private val overrideCache = ConcurrentHashMap<Locale, ResourceBundle>()
 
+    // 关闭 JVM 默认 Locale 回退：没有 _en 时应回退到 base（英文），而不是系统默认的 _zh_CN。
+    private val noFallbackControl: ResourceBundle.Control =
+        ResourceBundle.Control.getNoFallbackControl(ResourceBundle.Control.FORMAT_PROPERTIES)
+
     @JvmStatic
     fun message(key: @PropertyKey(resourceBundle = BUNDLE) String, vararg params: Any?): @Nls String {
         val override = ApplicationLanguageHolder.overrideLocale()
@@ -33,7 +37,12 @@ internal object MyMessageBundle {
 
     private fun formatFromLocale(locale: Locale, key: String, params: Array<out Any?>): String {
         val bundle = overrideCache.computeIfAbsent(locale) {
-            ResourceBundle.getBundle(BUNDLE, locale, MyMessageBundle::class.java.classLoader)
+            ResourceBundle.getBundle(
+                BUNDLE,
+                locale,
+                MyMessageBundle::class.java.classLoader,
+                noFallbackControl,
+            )
         }
         val raw = try {
             bundle.getString(key)

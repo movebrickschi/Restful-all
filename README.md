@@ -1,4 +1,38 @@
-# Restful-all
+<div align="center">
+
+# 🔍 Restful-all
+
+**跨语言跨框架的 REST 路由搜索器 · IntelliJ IDEA 插件**
+
+*A multi-language, multi-framework REST route navigator for IntelliJ IDEA*
+
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.x-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
+[![IntelliJ Platform](https://img.shields.io/badge/IntelliJ%20Platform-2025.2%2B-000000?logo=intellijidea&logoColor=white)](https://plugins.jetbrains.com/)
+[![JDK](https://img.shields.io/badge/JDK-21%2B-orange?logo=openjdk&logoColor=white)](https://openjdk.org)
+[![Gradle](https://img.shields.io/badge/Gradle-9.0%2B-02303A?logo=gradle&logoColor=white)](https://gradle.org/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+[🚀 快速开始](#使用方式) · [✨ 功能特性](#功能特性) · [📐 项目结构](#项目结构) · [💬 反馈](https://github.com/movebrickschi/Restful-all/issues)
+
+</div>
+
+---
+
+## 💡 为什么写这个插件
+
+在大型项目中，快速定位「某个 URL 到底在哪个控制器里」是个高频但费时的需求。IDE 自带的 Search Everywhere 在跨框架、跨语言项目里不够好用，于是有了这个插件。
+
+一句话总结：**`Ctrl+Alt+/` 一键唤起全项目 REST 路由列表，输关键字快速跳转。**
+
+什么人会需要：
+
+- 同时维护 **Java 后端 + Vue/React 前端** 的全栈开发者
+- 需要频繁在 **NestJS / Spring / Express / FastAPI** 多个项目间切换的架构师
+- 接手老项目、需要快速梳理 API 全貌的开发者
+
+---
+
+## Restful-all
 
 一款 IntelliJ IDEA 插件，用于自动发现项目中的 REST API 路由，并通过快捷键弹框快速搜索跳转到对应路由位置。
 
@@ -208,4 +242,15 @@ class MyFrameworkScanner : RouteScanner {
 
 ## License
 
-MIT
+[MIT](LICENSE) © [movebrickschi](https://github.com/movebrickschi)
+
+---
+
+<div align="center">
+
+**如果这个插件提高了你的效率，请点个 Star ⭐**<br/>
+*If this plugin makes your day easier, please leave a star ⭐*
+
+[⚡ 查看作者其他项目 / See more works](https://github.com/movebrickschi)
+
+</div>

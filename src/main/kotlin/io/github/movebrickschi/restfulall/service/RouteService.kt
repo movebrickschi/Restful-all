@@ -170,6 +170,11 @@ class RouteService(private val project: Project) : Disposable {
             .maxByOrNull { it.lineNumber }
     }
 
+    fun findRouteAtExactLine(file: VirtualFile, line: Int): RouteInfo? {
+        val routes = routesByFile[file.path] ?: return null
+        return routes.firstOrNull { it.lineNumber == line }
+    }
+
     fun updateFile(file: VirtualFile) {
         if (!shouldScan(file)) {
             if (routesByFile.remove(file.path) != null) rebuildSortedCache()

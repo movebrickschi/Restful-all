@@ -44,6 +44,9 @@
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.java</depends>
 
+    <depends optional="true" config-file="restful-all-js.xml">JavaScript</depends>
+    <depends optional="true" config-file="restful-all-python.xml">com.intellij.modules.python</depends>
+
     <resource-bundle>messages.MyMessageBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
@@ -51,7 +54,24 @@
                     icon="AllIcons.General.Web" anchor="bottom"/>
         <projectService serviceImplementation="io.github.movebrickschi.restfulall.service.RouteService"/>
         <projectService serviceImplementation="io.github.movebrickschi.restfulall.service.PluginSettingsState"/>
+        <projectService serviceImplementation="io.github.movebrickschi.restfulall.service.RestfulToolWindowHolder"/>
+        <projectService serviceImplementation="io.github.movebrickschi.restfulall.stats.RouteStatsService"/>
+
+        <codeInsight.lineMarkerProvider language="JAVA"
+                                        implementationClass="io.github.movebrickschi.restfulall.marker.RestRouteLineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider language="kotlin"
+                                        implementationClass="io.github.movebrickschi.restfulall.marker.RestRouteLineMarkerProvider"/>
+        <applicationService serviceImplementation="io.github.movebrickschi.restfulall.theme.ThemeService"/>
         <postStartupActivity implementation="io.github.movebrickschi.restfulall.service.RouteScanStartupActivity"/>
+
+        <!-- v1.1 Pro 功能通知组 -->
+        <notificationGroup id="Restful-all.Pro" displayType="BALLOON" bundle="messages.MyMessageBundle"
+                           key="notification.group.pro"/>
+
+        <!-- v1.1 像素小猫宠物 -->
+        <statusBarWidgetFactory id="Restful-all.Pet"
+                                implementation="io.github.movebrickschi.restfulall.pet.PetStatusBarWidgetFactory"
+                                order="last"/>
     </extensions>
 
     <actions>
@@ -71,6 +91,20 @@
                 class="io.github.movebrickschi.restfulall.action.CopyRoutePathAction">
             <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift C"/>
             <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+        </action>
+
+        <!-- v1.1 Pro - 主题切换 -->
+        <action id="Restful-all.SwitchTheme"
+                class="io.github.movebrickschi.restfulall.action.SwitchThemeAction"
+                icon="AllIcons.Actions.Colors">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+
+        <!-- v1.1 Pro - 年度报告 -->
+        <action id="Restful-all.YearReport"
+                class="io.github.movebrickschi.restfulall.action.ShowYearReportAction"
+                icon="AllIcons.Actions.Preview">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
     </actions>
 </idea-plugin>

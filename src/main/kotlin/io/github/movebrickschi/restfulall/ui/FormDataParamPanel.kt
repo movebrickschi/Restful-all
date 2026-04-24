@@ -112,6 +112,19 @@ class FormDataParamPanel : JPanel(BorderLayout()) {
         tableModel.fireTableDataChanged()
     }
 
+    /**
+     * 预填带类型的行：每个 Triple 为 (name, value, "text"|"file")。
+     */
+    fun setRows(rows: List<Triple<String, String, String>>) {
+        params.clear()
+        for ((name, value, type) in rows) {
+            val safeType = if (type == "file") "file" else "text"
+            params.add(FormDataRow(true, name, value, safeType))
+        }
+        params.add(FormDataRow(true, "", "", "text"))
+        tableModel.fireTableDataChanged()
+    }
+
     fun clear() {
         params.clear()
         params.add(FormDataRow(true, "", "", "text"))

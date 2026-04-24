@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "io.github.movebrickschi"
-version = "1.1.2"
+version = "1.2.0"
 
 repositories {
     mavenCentral()
@@ -36,37 +36,32 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>1.1.2 - Internationalization</h3>
+            <h3>1.2.0 - Discoverability & Cartoon Pet</h3>
             <ul>
-                <li><b>Internationalization</b>: Added full i18n support with Chinese and English bundles; all tool window labels, buttons and messages are now translatable.</li>
-                <li><b>Language Switcher</b>: New language selector in the tool window header with three options - <b>Auto</b> (follow IDE), <b>中文</b>, <b>English</b> - switchable at runtime without restart.</li>
+                <li><b>Visible Action Toolbar</b>: The route search popup now shows four icon buttons above the list — favorite, pin, edit note, and a one-click <code>@fav</code> filter — plus a grey hint line listing right-click / Ctrl+F / Ctrl+N / @fav / @note shortcuts. Buttons stay disabled until a row is selected.</li>
+                <li><b>Pro Trial Banner</b>: The popup now displays a small <i>"Pro trial — N day(s) left"</i> banner whenever a trial is active, so users notice Pro features instead of having to discover them.</li>
+                <li><b>Scanning Copy</b>: When refreshing routes, the status bar shows a friendly loading line (<code>loading.scanning</code> / <code>loading.big_project</code>) instead of staying blank.</li>
+                <li><b>Navigation Cheers</b>: Every successful jump now flashes a short cheer message in the IDE status bar (<code>nav.cheer.*</code>).</li>
+                <li><b>Year Report Teaser</b>: After every 100 / 500 / 1000 navigations, a notification invites you to open the annual report; <code>lastTeaserAt</code> prevents repeat alerts.</li>
+                <li><b>Cartoon Pixel Cat</b>: The status-bar pet has been redrawn from the "FREE Cat 2D Pixel Art" sprite sheets — now with idle, run, jump, attack and walk frames, plus random idle variants (lick / stretch) and click bounces.</li>
+                <li><b>Route Test Gutter Icon</b>: A web icon now appears in the editor gutter beside every REST route definition. Click it to activate the Restful-all tool window, switch to the Interface tab, and auto-load the route into the API debug panel (no request is sent).</li>
+                <li><b>Multi-language Gutter Coverage</b>: Gutter entry supports Java / Kotlin (Spring Boot) out of the box; JavaScript / TypeScript / TSX (NestJS, Express) and Python (FastAPI, Flask) are wired via optional plugin dependencies and auto-enable when the corresponding language plugin is installed — no extra config.</li>
+                <li><b>Stable Tool Window Handle</b>: Introduced a project-level <code>RestfulToolWindowHolder</code> so external entries (gutter, future actions) can reliably reach the active panel and tab without reflection.</li>
             </ul>
 
-            <h3>1.1.2 - 国际化</h3>
+            <h3>1.2.0 - 可见性与卡通小猫</h3>
             <ul>
-                <li><b>国际化支持</b>：新增完整的中英文资源包，工具窗中的标签、按钮与提示文案均可按语言切换。</li>
-                <li><b>语言切换器</b>：工具窗标题栏新增语言下拉，提供 <b>Auto</b>（跟随 IDE）、<b>中文</b>、<b>English</b> 三种选项，运行时即时切换，无需重启。</li>
+                <li><b>显式操作工具条</b>：路由搜索弹窗顶部新增 4 个图标按钮（收藏 / 置顶 / 备注 / 一键 @fav 过滤）和一行灰色快捷键提示，让原本只藏在右键和 Ctrl+F/N 后面的功能一眼可见；未选中行时按钮自动灰显。</li>
+                <li><b>Pro 试用横幅</b>：弹窗右上角显示 <i>「Pro 试用中—剩 N 天」</i> 横幅，避免用户在不知情的情况下错过 Pro 功能。</li>
+                <li><b>扫描文案</b>：刷新路由时，状态栏会显示一句拟人化的扫描文案（<code>loading.scanning</code> / <code>loading.big_project</code>），替代之前的空白等待。</li>
+                <li><b>跳转欢呼</b>：每次成功跳转后，IDE 底部状态栏会闪一句鼓励文案（<code>nav.cheer.*</code>）。</li>
+                <li><b>年报里程碑提醒</b>：累计跳转跨过 100 / 500 / 1000 次时，弹出带「打开年度报告」按钮的通知；通过 <code>lastTeaserAt</code> 字段避免重复打扰。</li>
+                <li><b>卡通像素小猫</b>：状态栏宠物卡通形象，包含 idle / run / jump / attack / walk 多套动作，会随机做出舔毛、伸懒腰等小动作，点击还会跳一下。</li>
+                <li><b>路由测试 Gutter 图标</b>：业务代码中每个 REST 路由定义的左侧 gutter 现在会出现一个 web 小图标，点击即可激活 Restful-all 工具窗口、切到「接口」Tab，并把该路由自动加载到 API 调试面板（仅加载，不发送请求）。</li>
+                <li><b>多语言 Gutter 覆盖</b>：gutter 入口默认支持 Java / Kotlin（Spring Boot）；JavaScript / TypeScript / TSX（NestJS、Express）与 Python（FastAPI、Flask）通过 optional plugin 依赖接入，IDE 安装对应语言插件后自动启用，无需额外配置。</li>
+                <li><b>稳定工具窗口句柄</b>：新增项目级 <code>RestfulToolWindowHolder</code>，让 gutter 等外部入口能稳定拿到当前面板与 Tab，无需反射 ContentManager。</li>
             </ul>
 
-            <h3>1.1.1 - Feature Update</h3>
-            <ul>
-                <li><b>JSON Formatting</b>: One-click JSON formatting for global body content and response body.</li>
-                <li><b>Request History</b>: Automatically records up to 500 requests grouped by date, with full request/response replay.</li>
-                <li><b>Double-click Navigation</b>: Double-click any route in the list to jump to its source code.</li>
-                <li><b>Copy Route Path</b>: Press <b>Ctrl+Shift+C</b> anywhere inside a route method to copy the API path to clipboard.</li>
-                <li><b>Exclusive Tool Window</b>: Auto-hides other tool windows when activated, and hides itself when switching to other tool windows.</li>
-                <li>Requires IntelliJ IDEA 2025.2+ (build 252+).</li>
-            </ul>
-
-            <h3>1.1.1 - 功能更新</h3>
-            <ul>
-                <li><b>JSON 格式化</b>：一键格式化全局 Body 和响应内容中的 JSON。</li>
-                <li><b>请求历史</b>：自动记录最多 500 条请求，按日期分组，支持完整回放。</li>
-                <li><b>双击跳转</b>：在路由列表中双击即可跳转到对应源码位置。</li>
-                <li><b>复制路由路径</b>：在方法体内任意位置按 <b>Ctrl+Shift+C</b> 即可复制 API 路由路径到剪贴板。</li>
-                <li><b>工具窗口互斥</b>：激活时自动隐藏其他工具窗口，切换到其他工具窗口时自动隐藏。</li>
-                <li>需要 IntelliJ IDEA 2025.2+（构建版本 252+）。</li>
-            </ul>
         """.trimIndent()
     }
 }

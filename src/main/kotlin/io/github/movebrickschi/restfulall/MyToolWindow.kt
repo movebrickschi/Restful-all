@@ -9,6 +9,7 @@ import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.content.ContentManagerEvent
 import com.intellij.ui.content.ContentManagerListener
 import io.github.movebrickschi.restfulall.service.LanguageChangeListener
+import io.github.movebrickschi.restfulall.service.RestfulToolWindowHolder
 import io.github.movebrickschi.restfulall.ui.BaseUrlPanel
 import io.github.movebrickschi.restfulall.ui.GlobalParamsPanel
 import io.github.movebrickschi.restfulall.ui.RestfulToolWindowPanel
@@ -42,6 +43,10 @@ class MyToolWindowFactory : ToolWindowFactory {
         toolWindow.contentManager.addContent(historyContent)
         toolWindow.contentManager.addContent(baseUrlContent)
         toolWindow.contentManager.addContent(globalParamsContent)
+
+        val holder = RestfulToolWindowHolder.getInstance(project)
+        holder.panel = mainPanel
+        holder.interfaceContent = interfaceContent
 
         toolWindow.contentManager.addContentManagerListener(object : ContentManagerListener {
             override fun selectionChanged(event: ContentManagerEvent) {

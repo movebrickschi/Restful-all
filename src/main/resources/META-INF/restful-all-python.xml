@@ -1,0 +1,6 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <codeInsight.lineMarkerProvider language="Python"
+                                        implementationClass="io.github.movebrickschi.restfulall.marker.RestRouteLineMarkerProvider"/>
+    </extensions>
+</idea-plugin>

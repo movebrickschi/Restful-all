@@ -1,0 +1,12 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <codeInsight.lineMarkerProvider language="JavaScript"
+                                        implementationClass="io.github.movebrickschi.restfulall.marker.RestRouteLineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider language="ECMAScript 6"
+                                        implementationClass="io.github.movebrickschi.restfulall.marker.RestRouteLineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider language="TypeScript"
+                                        implementationClass="io.github.movebrickschi.restfulall.marker.RestRouteLineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider language="TypeScript JSX"
+                                        implementationClass="io.github.movebrickschi.restfulall.marker.RestRouteLineMarkerProvider"/>
+    </extensions>
+</idea-plugin>

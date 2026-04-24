@@ -15,12 +15,16 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import io.github.movebrickschi.restfulall.MyMessageBundle
 import io.github.movebrickschi.restfulall.model.ExtractedMethodParams
+import io.github.movebrickschi.restfulall.model.FormFieldType
 import io.github.movebrickschi.restfulall.model.Framework
 import io.github.movebrickschi.restfulall.model.ParamEntry
 import io.github.movebrickschi.restfulall.model.RequestHistoryEntry
 import io.github.movebrickschi.restfulall.model.RouteInfo
+import io.github.movebrickschi.restfulall.service.ExpressParamExtractor
 import io.github.movebrickschi.restfulall.service.LanguageChangeListener
+import io.github.movebrickschi.restfulall.service.NestJsParamExtractor
 import io.github.movebrickschi.restfulall.service.PluginSettingsState
+import io.github.movebrickschi.restfulall.service.PythonParamExtractor
 import io.github.movebrickschi.restfulall.service.SpringPsiParamExtractor
 import java.awt.BorderLayout
 import java.awt.CardLayout
@@ -367,14 +371,21 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
             requestTabs.selectedIndex = 0
         }
 
-        if (routeInfo.framework == Framework.SPRING) {
-            ReadAction.nonBlocking<ExtractedMethodParams?> {
-                SpringPsiParamExtractor.extract(project, routeInfo)
-            }
-            .finishOnUiThread(ModalityState.defaultModalityState()) { result ->
-                if (result != null) populateFromExtraction(result)
-            }
-            .submit(AppExecutorUtil.getAppExecutorService())
+        ReadAction.nonBlocking<ExtractedMethodParams?> {
+            extractParams(routeInfo)
+        }
+        .finishOnUiThread(ModalityState.defaultModalityState()) { result ->
+            if (result != null) populateFromExtraction(result)
+        }
+        .submit(AppExecutorUtil.getAppExecutorService())
+    }
+
+    private fun extractParams(routeInfo: RouteInfo): ExtractedMethodParams? {
+        return when (routeInfo.framework) {
+            Framework.SPRING -> SpringPsiParamExtractor.extract(project, routeInfo)
+            Framework.NESTJS -> NestJsParamExtractor.extract(routeInfo)
+            Framework.EXPRESS -> ExpressParamExtractor.extract(routeInfo)
+            Framework.PYTHON -> PythonParamExtractor.extract(routeInfo)
         }
     }
 
@@ -394,11 +405,21 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (params.cookieParams.isNotEmpty()) {
             cookiesPanel.setParams(params.cookieParams.map { it.name to it.testValue })
         }
-        if (params.bodyJson != null) {
+
+        // form-data 优先：multipart 端点不能再带 JSON 主 body
+        if (params.formParams.isNotEmpty()) {
+            selectBodyType("form-data")
+            formDataPanel.setRows(params.formParams.map {
+                Triple(it.name, it.testValue, if (it.type == FormFieldType.FILE) "file" else "text")
+            })
+        } else if (params.bodyJson != null) {
             selectBodyType("json")
             bodyTextArea.text = params.bodyJson
         }
+
         when {
+            params.formParams.isNotEmpty() ->
+                requestTabs.selectedIndex = 1
             params.bodyJson != null && params.queryParams.isEmpty() && params.pathParams.isEmpty() ->
                 requestTabs.selectedIndex = 1
             params.pathParams.isNotEmpty() ->

@@ -67,7 +67,7 @@ class ApiDocumentExporterTest {
     }
 
     @Test
-    fun `exports markdown table with escaped pipe characters`() {
+    fun `exports markdown chapters with source info`() {
         val routes = listOf(
             endpoint("GET", "/api/a|b", "A | B", "PipeController", "find", "Pipe API"),
         )
@@ -75,8 +75,11 @@ class ApiDocumentExporterTest {
         val document = ApiDocumentExporter.export(routes, ApiDocumentFormat.MARKDOWN, options())
 
         assertTrue(document.contains("# Restful-all API"))
-        assertTrue(document.contains("| Method | Path | Name | Group | Handler | Source |"))
-        assertTrue(document.contains("| GET | /api/a\\|b | A \\| B | Pipe API | PipeController#find | PipeController.kt:12 |"))
+        assertTrue(document.contains("## Pipe API"))
+        assertTrue(document.contains("### A | B"))
+        assertTrue(document.contains("`GET /api/a|b`"))
+        assertTrue(document.contains("PipeController#find"))
+        assertTrue(document.contains("PipeController.kt:12"))
     }
 
     @Test

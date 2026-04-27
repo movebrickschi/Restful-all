@@ -1,5 +1,8 @@
 package io.github.movebrickschi.restfulall.export
 
+import io.github.movebrickschi.restfulall.model.ExtractedFormParam
+import io.github.movebrickschi.restfulall.model.ExtractedMethodParams
+import io.github.movebrickschi.restfulall.model.ExtractedParam
 import io.github.movebrickschi.restfulall.model.RouteInfo
 import java.util.Locale
 
@@ -31,12 +34,23 @@ data class ApiExportEndpoint(
     val sourceFileName: String,
     val sourcePath: String,
     val sourceLine: Int,
+    val queryParams: List<ExtractedParam> = emptyList(),
+    val pathParams: List<ExtractedParam> = emptyList(),
+    val headerParams: List<ExtractedParam> = emptyList(),
+    val cookieParams: List<ExtractedParam> = emptyList(),
+    val bodyJson: String? = null,
+    val formParams: List<ExtractedFormParam> = emptyList(),
+    val responseJson: String? = null,
 )
 
 object ApiDocumentExporter {
 
-    fun fromRoutes(routes: List<RouteInfo>): List<ApiExportEndpoint> =
+    fun fromRoutes(
+        routes: List<RouteInfo>,
+        paramsMap: Map<RouteInfo, ExtractedMethodParams?> = emptyMap(),
+    ): List<ApiExportEndpoint> =
         routes.map { route ->
+            val params = paramsMap[route]
             ApiExportEndpoint(
                 method = route.method.displayName,
                 path = route.displayPath,
@@ -48,6 +62,13 @@ object ApiDocumentExporter {
                 sourceFileName = route.file.name,
                 sourcePath = route.file.path,
                 sourceLine = route.lineNumber + 1,
+                queryParams = params?.queryParams ?: emptyList(),
+                pathParams = params?.pathParams ?: emptyList(),
+                headerParams = params?.headerParams ?: emptyList(),
+                cookieParams = params?.cookieParams ?: emptyList(),
+                bodyJson = params?.bodyJson,
+                formParams = params?.formParams ?: emptyList(),
+                responseJson = params?.responseJson,
             )
         }
 
@@ -110,33 +131,185 @@ object ApiDocumentExporter {
     }
 
     private fun buildOperation(endpoint: ApiExportEndpoint, swagger: Boolean): Map<String, Any?> {
-        val pathParameters = pathParameterNames(endpoint.path).map { name ->
+        val allPathParamNames = pathParameterNames(endpoint.path).toSet()
+
+        // Merge: URL-pattern path params + extractor path params (by name, deduplicated)
+        val urlPathParams = pathParameterNames(endpoint.path).map { name ->
+            val extracted = endpoint.pathParams.find { it.name == name }
             linkedMapOf(
                 "name" to name,
                 "in" to "path",
                 "required" to true,
                 "schema" to linkedMapOf("type" to "string"),
+                *(if (extracted?.testValue?.isNotBlank() == true) arrayOf("example" to extracted.testValue) else emptyArray()),
             )
         }
+        val extraPathParams = endpoint.pathParams
+            .filter { it.name !in allPathParamNames }
+            .map { param ->
+                linkedMapOf(
+                    "name" to param.name,
+                    "in" to "path",
+                    "required" to true,
+                    "schema" to linkedMapOf("type" to "string"),
+                    *(if (param.testValue.isNotBlank()) arrayOf("example" to param.testValue) else emptyArray()),
+                )
+            }
+
+        val queryParameters = endpoint.queryParams.map { param ->
+            linkedMapOf(
+                "name" to param.name,
+                "in" to "query",
+                "required" to false,
+                "schema" to linkedMapOf("type" to "string"),
+                *(if (param.testValue.isNotBlank()) arrayOf("example" to param.testValue) else emptyArray()),
+            )
+        }
+
+        val headerParameters = endpoint.headerParams.map { param ->
+            linkedMapOf(
+                "name" to param.name,
+                "in" to "header",
+                "required" to false,
+                "schema" to linkedMapOf("type" to "string"),
+                *(if (param.testValue.isNotBlank()) arrayOf("example" to param.testValue) else emptyArray()),
+            )
+        }
+
+        val cookieParameters = endpoint.cookieParams.map { param ->
+            linkedMapOf(
+                "name" to param.name,
+                "in" to "cookie",
+                "required" to false,
+                "schema" to linkedMapOf("type" to "string"),
+                *(if (param.testValue.isNotBlank()) arrayOf("example" to param.testValue) else emptyArray()),
+            )
+        }
+
+        val parameters = (urlPathParams + extraPathParams + queryParameters + headerParameters + cookieParameters)
+
         val operation = linkedMapOf<String, Any?>(
             "summary" to endpoint.summary,
             "operationId" to operationId(endpoint),
             "tags" to listOf(endpoint.group).filter { it.isNotBlank() },
-            "parameters" to pathParameters,
-            "responses" to linkedMapOf(
-                "200" to linkedMapOf("description" to "Success"),
-            ),
-            "x-restful-all-source" to linkedMapOf(
-                "file" to endpoint.sourcePath,
-                "line" to endpoint.sourceLine,
-                "handler" to "${endpoint.className}#${endpoint.functionName}",
-                "framework" to endpoint.framework,
-            ),
+            "parameters" to parameters,
         )
+
+        // requestBody (OpenAPI 3.0)
+        if (!swagger) {
+            buildRequestBody(endpoint)?.let { operation["requestBody"] = it }
+        }
+
+        // responses
+        operation["responses"] = buildResponses(endpoint, swagger)
+
         if (swagger) {
             operation["produces"] = listOf("application/json")
+            val swaggerExtra = buildSwaggerBodyParams(endpoint)
+            if (swaggerExtra != null) {
+                operation["consumes"] = swaggerExtra.first
+                operation["parameters"] = parameters + swaggerExtra.second
+            }
         }
+
+        operation["x-restful-all-source"] = linkedMapOf(
+            "file" to endpoint.sourcePath,
+            "line" to endpoint.sourceLine,
+            "handler" to "${endpoint.className}#${endpoint.functionName}",
+            "framework" to endpoint.framework,
+        )
+
         return operation
+    }
+
+    private fun buildRequestBody(endpoint: ApiExportEndpoint): Map<String, Any?>? {
+        // form-data (file upload or form fields)
+        if (endpoint.formParams.isNotEmpty()) {
+            val properties = linkedMapOf<String, Any?>()
+            val required = mutableListOf<String>()
+            for (fp in endpoint.formParams) {
+                properties[fp.name] = when (fp.type.name) {
+                    "FILE" -> linkedMapOf("type" to "string", "format" to "binary")
+                    else -> linkedMapOf("type" to "string").also {
+                        if (fp.testValue.isNotBlank()) it["example"] = fp.testValue
+                    }
+                }
+            }
+            return linkedMapOf(
+                "content" to linkedMapOf(
+                    "multipart/form-data" to linkedMapOf(
+                        "schema" to linkedMapOf(
+                            "type" to "object",
+                            "properties" to properties,
+                            *(if (required.isNotEmpty()) arrayOf("required" to required) else emptyArray()),
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        // JSON body
+        if (endpoint.bodyJson != null) {
+            val content = linkedMapOf<String, Any?>(
+                "application/json" to linkedMapOf(
+                    "schema" to linkedMapOf("type" to "object"),
+                    "example" to endpoint.bodyJson,
+                ),
+            )
+            return linkedMapOf("content" to content)
+        }
+
+        return null
+    }
+
+    /**
+     * Swagger 2.0：返回 (consumes, extraParams) 或 null（无 body）。
+     * form-data 时每个字段独立为 in=formData 参数；json body 时为 in=body 参数。
+     */
+    private fun buildSwaggerBodyParams(endpoint: ApiExportEndpoint): Pair<List<String>, List<Map<String, Any?>>>? {
+        if (endpoint.formParams.isNotEmpty()) {
+            val formDataParams = endpoint.formParams.map { fp ->
+                linkedMapOf<String, Any?>(
+                    "name" to fp.name,
+                    "in" to "formData",
+                    "required" to false,
+                    "type" to when (fp.type.name) { "FILE" -> "file"; else -> "string" },
+                    *(if (fp.testValue.isNotBlank()) arrayOf("x-example" to fp.testValue) else emptyArray()),
+                )
+            }
+            return Pair(listOf("multipart/form-data"), formDataParams)
+        }
+        if (endpoint.bodyJson != null) {
+            val bodyParam = linkedMapOf<String, Any?>(
+                "name" to "body",
+                "in" to "body",
+                "required" to true,
+                "schema" to linkedMapOf("type" to "object"),
+                "x-example" to endpoint.bodyJson,
+            )
+            return Pair(listOf("application/json"), listOf(bodyParam))
+        }
+        return null
+    }
+
+    private fun buildResponses(endpoint: ApiExportEndpoint, swagger: Boolean): Map<String, Any?> {
+        val response200 = linkedMapOf<String, Any?>("description" to "Success")
+        if (endpoint.responseJson != null) {
+            if (swagger) {
+                response200["schema"] = linkedMapOf("type" to "object")
+                response200["examples"] = linkedMapOf(
+                    "application/json" to endpoint.responseJson,
+                )
+            } else {
+                response200["content"] = linkedMapOf(
+                    "application/json" to linkedMapOf(
+                        "schema" to linkedMapOf("type" to "object"),
+                        "example" to endpoint.responseJson,
+                    ),
+                )
+            }
+        }
+        return linkedMapOf("200" to response200)
     }
 
     private fun operationMethods(method: String): List<String> {
@@ -315,23 +488,137 @@ object ApiDocumentExporter {
             if (options.description.isNotBlank()) {
                 append(options.description).append("\n\n")
             }
-            append("| Method | Path | Name | Group | Handler | Source |\n")
-            append("|---|---|---|---|---|---|\n")
-            endpoints
+            append("**Version:** ").append(options.version).append("\n\n")
+
+            val groups = endpoints
                 .sortedWith(compareBy<ApiExportEndpoint> { normalizePath(it.path) }.thenBy { it.method })
-                .forEach { endpoint ->
-                    append("| ")
-                    append(escapeCell(endpoint.method.uppercase(Locale.ROOT))).append(" | ")
-                    append(escapeCell(normalizePath(endpoint.path))).append(" | ")
-                    append(escapeCell(endpoint.summary)).append(" | ")
-                    append(escapeCell(endpoint.group)).append(" | ")
-                    append(escapeCell("${endpoint.className}#${endpoint.functionName}")).append(" | ")
-                    append(escapeCell("${endpoint.sourceFileName}:${endpoint.sourceLine}")).append(" |\n")
+                .groupBy { it.group }
+
+            groups.forEach { (group, groupEndpoints) ->
+                if (group.isNotBlank()) {
+                    append("## ").append(group).append("\n\n")
                 }
+                groupEndpoints.forEach { endpoint ->
+                    appendEndpoint(endpoint)
+                }
+            }
+        }
+
+        private fun StringBuilder.appendEndpoint(endpoint: ApiExportEndpoint) {
+            val method = endpoint.method.uppercase(Locale.ROOT)
+            val title = endpoint.summary.ifBlank { endpoint.functionName }
+            append("### ").append(title).append("\n\n")
+            append("`").append(method).append(" ").append(normalizePath(endpoint.path)).append("`\n\n")
+
+            // Path parameters
+            val pathParams = mergePathParams(endpoint)
+            if (pathParams.isNotEmpty()) {
+                append("**Path Parameters**\n\n")
+                append("| Name | Type | Required | Example |\n")
+                append("|------|------|----------|---------|\n")
+                pathParams.forEach { p ->
+                    append("| ").append(escapeCell(p.name))
+                        .append(" | string | Yes | ").append(escapeCell(p.testValue)).append(" |\n")
+                }
+                append("\n")
+            }
+
+            // Query parameters
+            if (endpoint.queryParams.isNotEmpty()) {
+                append("**Query Parameters**\n\n")
+                append("| Name | Type | Required | Example |\n")
+                append("|------|------|----------|---------|\n")
+                endpoint.queryParams.forEach { p ->
+                    append("| ").append(escapeCell(p.name))
+                        .append(" | string | No | ").append(escapeCell(p.testValue)).append(" |\n")
+                }
+                append("\n")
+            }
+
+            // Header parameters
+            if (endpoint.headerParams.isNotEmpty()) {
+                append("**Header Parameters**\n\n")
+                append("| Name | Type | Required | Example |\n")
+                append("|------|------|----------|---------|\n")
+                endpoint.headerParams.forEach { p ->
+                    append("| ").append(escapeCell(p.name))
+                        .append(" | string | No | ").append(escapeCell(p.testValue)).append(" |\n")
+                }
+                append("\n")
+            }
+
+            // Cookie parameters
+            if (endpoint.cookieParams.isNotEmpty()) {
+                append("**Cookie Parameters**\n\n")
+                append("| Name | Type | Required | Example |\n")
+                append("|------|------|----------|---------|\n")
+                endpoint.cookieParams.forEach { p ->
+                    append("| ").append(escapeCell(p.name))
+                        .append(" | string | No | ").append(escapeCell(p.testValue)).append(" |\n")
+                }
+                append("\n")
+            }
+
+            // Form-data parameters
+            if (endpoint.formParams.isNotEmpty()) {
+                append("**Form Data**\n\n")
+                append("| Name | Type | Example |\n")
+                append("|------|------|---------|\n")
+                endpoint.formParams.forEach { fp ->
+                    val type = if (fp.type.name == "FILE") "file" else "string"
+                    append("| ").append(escapeCell(fp.name))
+                        .append(" | ").append(type)
+                        .append(" | ").append(escapeCell(fp.testValue)).append(" |\n")
+                }
+                append("\n")
+            }
+
+            // Request body
+            if (endpoint.bodyJson != null) {
+                append("**Request Body** (`application/json`)\n\n")
+                append("```json\n")
+                append(endpoint.bodyJson)
+                append("\n```\n\n")
+            }
+
+            // Response
+            append("**Response** (`200 Success`)\n\n")
+            if (endpoint.responseJson != null) {
+                append("```json\n")
+                append(endpoint.responseJson)
+                append("\n```\n\n")
+            } else {
+                append("_No response schema available._\n\n")
+            }
+
+            // Source
+            append("> Source: `${escapeCell(endpoint.sourceFileName)}:${endpoint.sourceLine}`  ")
+            append("Handler: `${escapeCell(endpoint.className)}#${escapeCell(endpoint.functionName)}`\n\n")
+            append("---\n\n")
+        }
+
+        /** Merge URL-pattern path params with extractor path params, deduplicated by name */
+        private fun mergePathParams(endpoint: ApiExportEndpoint): List<ExtractedParam> {
+            val urlNames = pathParameterNames(endpoint.path).toSet()
+            val fromExtractor = endpoint.pathParams.associateBy { it.name }
+            val result = mutableListOf<io.github.movebrickschi.restfulall.model.ExtractedParam>()
+            for (name in urlNames) {
+                val e = fromExtractor[name]
+                result.add(io.github.movebrickschi.restfulall.model.ExtractedParam(
+                    name = name,
+                    location = io.github.movebrickschi.restfulall.model.ParamLocation.PATH,
+                    testValue = e?.testValue ?: "",
+                ))
+            }
+            endpoint.pathParams.filter { it.name !in urlNames }.forEach { result.add(it) }
+            return result
         }
 
         private fun escapeCell(value: String): String =
             value.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
+
+        private fun pathParameterNames(path: String): List<String> =
+            PATH_PARAMETER_PATTERN.findAll(path).map { it.groupValues[1] }.distinct().toList()
     }
 
     private val PATH_PARAMETER_PATTERN = Regex("\\{([^}/]+)}")

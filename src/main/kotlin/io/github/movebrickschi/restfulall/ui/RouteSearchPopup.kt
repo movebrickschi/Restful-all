@@ -456,6 +456,19 @@ class RouteSearchPopup(
         (routeList.getFontMetrics(routeList.font).stringWidth(path) + JBUI.scale(4))
             .coerceAtMost(popupPathColumnWidth)
 
+    private fun recalculateColumnWidths() {
+        val listWidth = routeList.width.takeIf { it > 0 } ?: return
+        val fixedWidth = POPUP_METHOD_WIDTH + POPUP_GAP * 2 + JBUI.scale(20)
+        val available = (listWidth - fixedWidth)
+            .coerceAtLeast(MIN_POPUP_NAME_COLUMN_WIDTH + MIN_POPUP_PATH_COLUMN_WIDTH)
+        val nameRatio = DEFAULT_POPUP_NAME_COLUMN_WIDTH.toFloat() /
+            (DEFAULT_POPUP_NAME_COLUMN_WIDTH + DEFAULT_POPUP_PATH_COLUMN_WIDTH)
+        popupNameColumnWidth = (available * nameRatio).toInt()
+            .coerceAtLeast(MIN_POPUP_NAME_COLUMN_WIDTH)
+        popupPathColumnWidth = (available - popupNameColumnWidth)
+            .coerceAtLeast(MIN_POPUP_PATH_COLUMN_WIDTH)
+    }
+
     private fun hoverBackground(): Color =
         UIManager.getColor("List.hoverBackground") ?: Color(0x3D, 0x3F, 0x41)
 
@@ -552,6 +565,9 @@ class RouteSearchPopup(
                 override fun componentResized(e: java.awt.event.ComponentEvent) {
                     scrollPane.setBounds(0, 0, listBody.width, listBody.height)
                     emptyPlaceholder.setBounds(0, listBody.height / 2 - 30, listBody.width, 60)
+                    recalculateColumnWidths()
+                    routeList.revalidate()
+                    routeList.repaint()
                 }
             })
             listContainer.add(listBody, BorderLayout.CENTER)

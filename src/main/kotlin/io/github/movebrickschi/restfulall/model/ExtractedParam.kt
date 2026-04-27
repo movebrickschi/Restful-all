@@ -32,4 +32,5 @@ data class ExtractedMethodParams(
     val cookieParams: List<ExtractedParam> = emptyList(),
     val formParams: List<ExtractedFormParam> = emptyList(),
     val bodyJson: String? = null,
+    val responseJson: String? = null,
 )

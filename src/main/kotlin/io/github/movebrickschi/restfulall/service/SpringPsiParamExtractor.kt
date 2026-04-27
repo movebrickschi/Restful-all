@@ -72,12 +72,49 @@ object SpringPsiParamExtractor {
         // 第一遍：检测是否存在文件参数
         val hasFile = parameters.any { isFileType(it.type) }
 
-        if (hasFile) {
-            return extractAsFormData(parameters)
-        }
-
-        return extractRegular(parameters)
+        val base = if (hasFile) extractAsFormData(parameters) else extractRegular(parameters)
+        val responseJson = extractReturnJson(psiMethod)
+        return base.copy(responseJson = responseJson)
     }
+
+    private fun extractReturnJson(psiMethod: PsiMethod): String? {
+        val returnType = psiMethod.returnType ?: return null
+        val inner = unwrapWrapperType(returnType) ?: return null
+        val fqn = inner.canonicalText
+        if (fqn == "void" || fqn == "kotlin.Unit" || fqn == "java.lang.Void") return null
+        return TestValueGenerator.generateJson(inner)
+    }
+
+    /**
+     * 剥离 ResponseEntity<T>、Mono<T>、Flux<T> 等外壳，返回内部类型。
+     * 若外壳内是 Void/Unit 则返回 null（表示无响应体）。
+     * 若类型本身不是包装类则直接返回原类型。
+     */
+    private fun unwrapWrapperType(type: PsiType): PsiType? {
+        if (type is PsiClassType) {
+            val resolved = type.resolve()
+            val fqn = resolved?.qualifiedName ?: return type
+            if (fqn in WRAPPER_TYPE_FQNS) {
+                val typeArgs = type.parameters
+                if (typeArgs.isEmpty()) return null
+                val inner = typeArgs[0]
+                val innerFqn = inner.canonicalText
+                if (innerFqn == "java.lang.Void" || innerFqn == "kotlin.Unit" || innerFqn == "void") return null
+                return inner
+            }
+        }
+        return type
+    }
+
+    private val WRAPPER_TYPE_FQNS = setOf(
+        "org.springframework.http.ResponseEntity",
+        "org.springframework.http.HttpEntity",
+        "reactor.core.publisher.Mono",
+        "reactor.core.publisher.Flux",
+        "java.util.concurrent.CompletableFuture",
+        "java.util.concurrent.Future",
+        "org.springframework.web.context.request.async.DeferredResult",
+    )
 
     /**
      * 普通模式：保持现有 query/path/header/cookie/body 划分。

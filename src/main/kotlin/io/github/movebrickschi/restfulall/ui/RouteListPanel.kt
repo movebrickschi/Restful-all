@@ -2,6 +2,7 @@ package io.github.movebrickschi.restfulall.ui
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
@@ -14,9 +15,15 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import io.github.movebrickschi.restfulall.MyMessageBundle
 import io.github.movebrickschi.restfulall.export.ApiDocumentExporter
+import io.github.movebrickschi.restfulall.model.ExtractedMethodParams
+import io.github.movebrickschi.restfulall.model.Framework
 import io.github.movebrickschi.restfulall.model.RouteInfo
+import io.github.movebrickschi.restfulall.service.ExpressParamExtractor
 import io.github.movebrickschi.restfulall.service.LanguageChangeListener
+import io.github.movebrickschi.restfulall.service.NestJsParamExtractor
+import io.github.movebrickschi.restfulall.service.PythonParamExtractor
 import io.github.movebrickschi.restfulall.service.RouteService
+import io.github.movebrickschi.restfulall.service.SpringPsiParamExtractor
 import java.awt.*
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
@@ -277,6 +284,7 @@ class RouteListPanel(
             return
         }
         val format = dialog.format
+        val options = dialog.options
 
         val chooser = JFileChooser().apply {
             dialogTitle = MyMessageBundle.message("route.list.export.title")
@@ -285,27 +293,61 @@ class RouteListPanel(
         if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return
 
         val target = ensureExtension(chooser.selectedFile, format.extension)
-        try {
-            val endpoints = ApiDocumentExporter.fromRoutes(selectedRoutes)
-            val content = ApiDocumentExporter.export(
-                endpoints,
-                format,
-                dialog.options,
-            )
-            target.writeText(content, Charsets.UTF_8)
-            Messages.showInfoMessage(
-                project,
-                MyMessageBundle.message("route.list.export.success", target.absolutePath),
-                MyMessageBundle.message("route.list.export.title"),
-            )
-        } catch (e: Exception) {
-            Messages.showErrorDialog(
-                project,
-                MyMessageBundle.message("route.list.export.failure", e.message ?: e.javaClass.simpleName),
-                MyMessageBundle.message("route.list.export.title"),
-            )
-        }
+
+        // Extract params in background with progress dialog, then write on EDT
+        val paramsMap = mutableMapOf<RouteInfo, ExtractedMethodParams?>()
+        ProgressManager.getInstance().run(object : Task.Modal(
+            project,
+            MyMessageBundle.message("route.list.export.extracting"),
+            false,
+        ) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = false
+                selectedRoutes.forEachIndexed { index, route ->
+                    indicator.fraction = index.toDouble() / selectedRoutes.size
+                    indicator.text2 = route.displayPath
+                    paramsMap[route] = ReadAction.compute<ExtractedMethodParams?, Throwable> {
+                        extractRouteParams(route)
+                    }
+                }
+            }
+
+            override fun onSuccess() {
+                try {
+                    val endpoints = ApiDocumentExporter.fromRoutes(selectedRoutes, paramsMap)
+                    val content = ApiDocumentExporter.export(endpoints, format, options)
+                    target.writeText(content, Charsets.UTF_8)
+                    Messages.showInfoMessage(
+                        project,
+                        MyMessageBundle.message("route.list.export.success", target.absolutePath),
+                        MyMessageBundle.message("route.list.export.title"),
+                    )
+                } catch (e: Exception) {
+                    Messages.showErrorDialog(
+                        project,
+                        MyMessageBundle.message("route.list.export.failure", e.message ?: e.javaClass.simpleName),
+                        MyMessageBundle.message("route.list.export.title"),
+                    )
+                }
+            }
+
+            override fun onThrowable(error: Throwable) {
+                Messages.showErrorDialog(
+                    project,
+                    MyMessageBundle.message("route.list.export.failure", error.message ?: error.javaClass.simpleName),
+                    MyMessageBundle.message("route.list.export.title"),
+                )
+            }
+        })
     }
+
+    private fun extractRouteParams(routeInfo: RouteInfo): ExtractedMethodParams? =
+        when (routeInfo.framework) {
+            Framework.SPRING -> SpringPsiParamExtractor.extract(project, routeInfo)
+            Framework.NESTJS -> NestJsParamExtractor.extract(routeInfo)
+            Framework.EXPRESS -> ExpressParamExtractor.extract(routeInfo)
+            Framework.PYTHON -> PythonParamExtractor.extract(routeInfo)
+        }
 
     private fun updateRoutes(newRoutes: List<RouteInfo>) {
         allRoutes.clear()

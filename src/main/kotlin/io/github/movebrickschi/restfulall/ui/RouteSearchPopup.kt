@@ -11,14 +11,13 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.JBPopup
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.wm.WindowManager
-import com.intellij.ui.ColoredListCellRenderer
-import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBList
+import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextField
+import com.intellij.util.ui.JBUI
 import io.github.movebrickschi.restfulall.MyMessageBundle
 import io.github.movebrickschi.restfulall.humanize.FunMessageProvider
 import io.github.movebrickschi.restfulall.license.LicenseManager
-import io.github.movebrickschi.restfulall.model.HttpMethod
 import io.github.movebrickschi.restfulall.model.RouteInfo
 import io.github.movebrickschi.restfulall.model.UserRouteMeta
 import io.github.movebrickschi.restfulall.service.PluginSettingsState
@@ -27,8 +26,13 @@ import io.github.movebrickschi.restfulall.sort.RouteSortStrategy
 import io.github.movebrickschi.restfulall.stats.RouteStatsService
 import io.github.movebrickschi.restfulall.theme.ThemeService
 import java.awt.BorderLayout
+import java.awt.Color
+import java.awt.Component
 import java.awt.Cursor
 import java.awt.Dimension
+import java.awt.Font
+import java.awt.Graphics
+import java.awt.Graphics2D
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
@@ -75,6 +79,9 @@ class RouteSearchPopup(
     private val debounceTimer = Timer(DEBOUNCE_MS) { updateList(searchField.text) }.apply {
         isRepeats = false
     }
+    private var hoverIndex = -1
+    private var popupNameColumnWidth = DEFAULT_POPUP_NAME_COLUMN_WIDTH
+    private var popupPathColumnWidth = DEFAULT_POPUP_PATH_COLUMN_WIDTH
 
     init {
         setupUI()
@@ -144,6 +151,7 @@ class RouteSearchPopup(
 
         routeList.cellRenderer = RouteCellRenderer()
         routeList.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        routeList.fixedCellHeight = JBUI.scale(28)
         routeList.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 if (e.clickCount == 2) navigateToSelected()
@@ -156,9 +164,28 @@ class RouteSearchPopup(
             override fun mouseReleased(e: MouseEvent) {
                 maybeShowContextMenu(e)
             }
+
+            override fun mouseExited(e: MouseEvent) {
+                updateHoverIndex(-1)
+            }
+        })
+        routeList.addMouseMotionListener(object : MouseAdapter() {
+            override fun mouseMoved(e: MouseEvent) {
+                val index = routeList.locationToIndex(e.point)
+                val bounds = if (index >= 0) routeList.getCellBounds(index, index) else null
+                updateHoverIndex(if (bounds != null && bounds.contains(e.point)) index else -1)
+            }
         })
         routeList.addListSelectionListener { syncToolbarEnabled() }
         syncToolbarEnabled()
+    }
+
+    private fun updateHoverIndex(index: Int) {
+        if (hoverIndex == index) return
+        val old = hoverIndex
+        hoverIndex = index
+        if (old >= 0) routeList.getCellBounds(old, old)?.let { routeList.repaint(it) }
+        if (index >= 0) routeList.getCellBounds(index, index)?.let { routeList.repaint(it) }
     }
 
     private fun createToolbarButton(icon: javax.swing.Icon, tipKey: String, onClick: () -> Unit): JButton {
@@ -337,6 +364,13 @@ class RouteSearchPopup(
                     refreshLabel.isEnabled = true
                 }
             }
+
+            override fun onFinished() {
+                ApplicationManager.getApplication().invokeLater {
+                    refreshLabel.text = MyMessageBundle.message("route.search.refresh")
+                    refreshLabel.isEnabled = true
+                }
+            }
         })
     }
 
@@ -345,6 +379,7 @@ class RouteSearchPopup(
     }
 
     private fun updateList(query: String) {
+        hoverIndex = -1
         listModel.clear()
         val lowerQuery = query.lowercase().trim()
         var totalMatched = 0
@@ -417,6 +452,13 @@ class RouteSearchPopup(
         .replace("<", "&lt;")
         .replace(">", "&gt;")
 
+    private fun popupPathTextWidth(path: String): Int =
+        (routeList.getFontMetrics(routeList.font).stringWidth(path) + JBUI.scale(4))
+            .coerceAtMost(popupPathColumnWidth)
+
+    private fun hoverBackground(): Color =
+        UIManager.getColor("List.hoverBackground") ?: Color(0x3D, 0x3F, 0x41)
+
     private fun maybeShowDailyGreeting() {
         val settings = PluginSettingsState.getInstance(project)
         val today = java.time.LocalDate.now().toString()
@@ -456,19 +498,20 @@ class RouteSearchPopup(
 
     private fun updateTrialBanner() {
         try {
-            if (LicenseManager.hasValidLicense()) {
-                trialBannerLabel.isVisible = false
-                return
-            }
-            val days = LicenseManager.remainingTrialDays(project)
-            if (days > 0) {
-                trialBannerLabel.text = MyMessageBundle.message("popup.trial.banner", days)
-                trialBannerLabel.foreground = java.awt.Color(0xE5, 0x8E, 0x26)
-                trialBannerLabel.isVisible = true
-            } else {
-                trialBannerLabel.text = MyMessageBundle.message("popup.trial.expired")
-                trialBannerLabel.foreground = java.awt.Color(0xC9, 0x5A, 0x5A)
-                trialBannerLabel.isVisible = true
+            when (LicenseManager.licenseState()) {
+                LicenseManager.LicenseState.LICENSED -> {
+                    trialBannerLabel.isVisible = false
+                }
+                LicenseManager.LicenseState.UNLICENSED -> {
+                    trialBannerLabel.text = MyMessageBundle.message("popup.pro.banner")
+                    trialBannerLabel.foreground = java.awt.Color(0xE5, 0x8E, 0x26)
+                    trialBannerLabel.isVisible = true
+                }
+                LicenseManager.LicenseState.UNKNOWN -> {
+                    trialBannerLabel.text = MyMessageBundle.message("popup.pro.checking")
+                    trialBannerLabel.foreground = java.awt.Color(0x7A, 0x7F, 0x87)
+                    trialBannerLabel.isVisible = true
+                }
             }
         } catch (_: Throwable) {
             trialBannerLabel.isVisible = false
@@ -494,21 +537,24 @@ class RouteSearchPopup(
             }
             add(topStack, BorderLayout.NORTH)
 
-            val listContainer = JLayeredPane().apply {
-                layout = null
+            val listContainer = JPanel(BorderLayout()).apply {
                 preferredSize = Dimension(700, 400)
+            }
+            val listBody = JLayeredPane().apply {
+                layout = null
             }
             val scrollPane = JScrollPane(routeList)
             scrollPane.setBounds(0, 0, 700, 400)
             emptyPlaceholder.setBounds(0, 150, 700, 60)
-            listContainer.add(scrollPane, JLayeredPane.DEFAULT_LAYER)
-            listContainer.add(emptyPlaceholder, JLayeredPane.PALETTE_LAYER)
-            listContainer.addComponentListener(object : java.awt.event.ComponentAdapter() {
+            listBody.add(scrollPane, JLayeredPane.DEFAULT_LAYER)
+            listBody.add(emptyPlaceholder, JLayeredPane.PALETTE_LAYER)
+            listBody.addComponentListener(object : java.awt.event.ComponentAdapter() {
                 override fun componentResized(e: java.awt.event.ComponentEvent) {
-                    scrollPane.setBounds(0, 0, listContainer.width, listContainer.height)
-                    emptyPlaceholder.setBounds(0, listContainer.height / 2 - 30, listContainer.width, 60)
+                    scrollPane.setBounds(0, 0, listBody.width, listBody.height)
+                    emptyPlaceholder.setBounds(0, listBody.height / 2 - 30, listBody.width, 60)
                 }
             })
+            listContainer.add(listBody, BorderLayout.CENTER)
             add(listContainer, BorderLayout.CENTER)
 
             val bottomBar = JPanel(BorderLayout()).apply {
@@ -547,94 +593,92 @@ class RouteSearchPopup(
         private const val MAX_VISIBLE_ITEMS = 200
         private const val DEBOUNCE_MS = 150
         private const val TODAY_LIMIT = 3
+        private const val POPUP_METHOD_WIDTH = 44
+        private const val POPUP_GAP = 8
+        private const val POPUP_ROW_HEIGHT = 24
+        private const val MIN_POPUP_NAME_COLUMN_WIDTH = 100
+        private const val DEFAULT_POPUP_NAME_COLUMN_WIDTH = 210
+        private const val MIN_POPUP_PATH_COLUMN_WIDTH = 180
+        private const val DEFAULT_POPUP_PATH_COLUMN_WIDTH = 360
     }
 
-    private inner class RouteCellRenderer : ColoredListCellRenderer<RouteInfo>() {
-        override fun customizeCellRenderer(
+    private inner class RouteCellRenderer : JPanel(), ListCellRenderer<RouteInfo> {
+        private val methodBadge = MethodBadge()
+        private val nameLabel = JLabel().apply {
+            horizontalAlignment = SwingConstants.LEFT
+            verticalAlignment = SwingConstants.CENTER
+            alignmentY = Component.CENTER_ALIGNMENT
+        }
+        private val pathLabel = JLabel().apply {
+            horizontalAlignment = SwingConstants.LEFT
+            verticalAlignment = SwingConstants.CENTER
+            alignmentY = Component.CENTER_ALIGNMENT
+        }
+
+        init {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            border = JBUI.Borders.empty(1, 0, 1, 4)
+            add(methodBadge)
+            add(Box.createHorizontalStrut(POPUP_GAP))
+            add(nameLabel)
+            add(Box.createHorizontalStrut(POPUP_GAP))
+            add(pathLabel)
+            add(Box.createHorizontalGlue())
+        }
+
+        override fun getListCellRendererComponent(
             list: JList<out RouteInfo>,
             value: RouteInfo,
             index: Int,
-            selected: Boolean,
-            hasFocus: Boolean,
-        ) {
+            isSelected: Boolean,
+            cellHasFocus: Boolean,
+        ): Component {
             val theme = ThemeService.getInstance().current()
             val settings = PluginSettingsState.getInstance(project)
             val meta = settings.getMeta(UserRouteMeta.keyOf(value))
+            val hovered = index == hoverIndex
+            val methodColor = value.method.color
+            val routeName = value.routeName.ifBlank { value.functionName }
 
-            // 图标：Pinned > Favorite > None
-            icon = when {
-                meta?.pinned == true -> AllIcons.General.Pin_tab
-                meta?.favorite == true -> AllIcons.Nodes.Favorite
-                else -> null
+            methodBadge.setMethod(value.methodLabel(), methodColor)
+            nameLabel.text = routeName
+            pathLabel.text = value.displayPath
+
+            val textColor = if (isSelected) list.selectionForeground else list.foreground
+            nameLabel.foreground = textColor
+            pathLabel.foreground = if (isSelected) textColor else theme.mutedColor
+
+            methodBadge.applyFixedSize(POPUP_METHOD_WIDTH, POPUP_ROW_HEIGHT)
+            nameLabel.preferredSize = Dimension(popupNameColumnWidth, POPUP_ROW_HEIGHT)
+            nameLabel.minimumSize = nameLabel.preferredSize
+            nameLabel.maximumSize = nameLabel.preferredSize
+            pathLabel.preferredSize = Dimension(popupPathTextWidth(value.displayPath), POPUP_ROW_HEIGHT)
+            pathLabel.minimumSize = pathLabel.preferredSize
+            pathLabel.maximumSize = pathLabel.preferredSize
+
+            isOpaque = isSelected || hovered
+            background = when {
+                isSelected -> list.selectionBackground
+                hovered -> hoverBackground()
+                else -> list.background
             }
-
-            val methodColor = theme.colorFor(value.method)
-            val methodAttr = SimpleTextAttributes(
-                SimpleTextAttributes.STYLE_BOLD,
-                if (selected) null else methodColor,
-            )
-            append(value.method.displayName.padEnd(8), methodAttr)
-
-            append(value.displayPath, SimpleTextAttributes.REGULAR_ATTRIBUTES)
-
-            // 备注标识
-            if (!meta?.note.isNullOrBlank()) {
-                append("  ")
-                val noteAttr = SimpleTextAttributes(
-                    SimpleTextAttributes.STYLE_PLAIN,
-                    if (selected) null else theme.accentColor,
-                )
-                append("[${truncate(meta!!.note, 24)}]", noteAttr)
-            }
-
-            // 标签
-            if (meta?.tags?.isNotEmpty() == true) {
-                append("  ")
-                val tagAttr = SimpleTextAttributes(
-                    SimpleTextAttributes.STYLE_SMALLER,
-                    if (selected) null else theme.mutedColor,
-                )
-                append(meta.tags.joinToString(" ") { "#$it" }, tagAttr)
-            }
-
-            append("  ")
-
-            val locationAttr = SimpleTextAttributes(
-                SimpleTextAttributes.STYLE_ITALIC,
-                if (selected) null else theme.mutedColor,
-            )
-            append("${value.className}#${value.functionName}", locationAttr)
-
-            append("  ")
-
-            val fileAttr = SimpleTextAttributes(
-                SimpleTextAttributes.STYLE_SMALLER,
-                if (selected) null else theme.fileColor,
-            )
-            append("${value.file.name}:${value.lineNumber + 1}", fileAttr)
-
-            val frameworkAttr = SimpleTextAttributes(
-                SimpleTextAttributes.STYLE_SMALLER,
-                if (selected) null else methodColor,
-            )
-            append("  [${value.framework.displayName}]", frameworkAttr)
-
-            // 访问次数徽章
-            val count = meta?.accessCount ?: 0
-            if (count > 0) {
-                append("  ")
-                val countAttr = SimpleTextAttributes(
-                    SimpleTextAttributes.STYLE_SMALLER,
-                    if (selected) null else theme.mutedColor,
-                )
-                append("×$count", countAttr)
-            }
-
-            // tooltip 显示完整备注（若存在）
-            toolTipText = if (!meta?.note.isNullOrBlank()) meta!!.note else null
+            toolTipText = buildTooltip(value, meta)
+            return this
         }
 
-        private fun truncate(text: String, max: Int): String =
-            if (text.length <= max) text else text.take(max - 1) + "…"
+        private fun buildTooltip(route: RouteInfo, meta: UserRouteMeta?): String {
+            val note = meta?.note?.takeIf { it.isNotBlank() }
+            val tags = meta?.tags?.takeIf { it.isNotEmpty() }?.joinToString(" ") { "#$it" }
+            return listOfNotNull(
+                "${route.className}#${route.functionName}",
+                "${route.file.name}:${route.lineNumber + 1}",
+                route.framework.displayName,
+                tags,
+                note,
+            ).joinToString("  ")
+        }
     }
+
+    private fun RouteInfo.methodLabel(): String =
+        if (method.displayName.equals("DELETE", ignoreCase = true)) "DEL" else method.displayName
 }

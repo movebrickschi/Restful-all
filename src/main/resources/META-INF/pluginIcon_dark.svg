@@ -4,14 +4,14 @@
           stroke="url(#symbol)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
     <defs>
         <linearGradient id="mark" x1="7" y1="5" x2="34" y2="36" gradientUnits="userSpaceOnUse">
-            <stop stop-color="#18243A"/>
-            <stop offset="1" stop-color="#050A14"/>
+            <stop stop-color="#111C30"/>
+            <stop offset="1" stop-color="#020617"/>
         </linearGradient>
         <linearGradient id="symbol" x1="12" y1="14" x2="27" y2="27" gradientUnits="userSpaceOnUse">
-            <stop stop-color="#FDE68A"/>
-            <stop offset="0.38" stop-color="#5EEAD4"/>
-            <stop offset="0.7" stop-color="#60A5FA"/>
-            <stop offset="1" stop-color="#D8B4FE"/>
+            <stop stop-color="#FEF3C7"/>
+            <stop offset="0.36" stop-color="#67E8F9"/>
+            <stop offset="0.68" stop-color="#93C5FD"/>
+            <stop offset="1" stop-color="#E9D5FF"/>
         </linearGradient>
     </defs>
 </svg>

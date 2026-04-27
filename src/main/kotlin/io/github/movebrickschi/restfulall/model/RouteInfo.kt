@@ -11,6 +11,9 @@ data class RouteInfo(
     val file: VirtualFile,
     val lineNumber: Int,
     val framework: Framework,
+    val packageName: String = "",
+    val routeGroupName: String = "",
+    val routeName: String = "",
 ) {
     val displayPath: String = run {
         val normalized = fullPath.replace(SLASH_PATTERN, "/")
@@ -18,7 +21,7 @@ data class RouteInfo(
     }
 
     val searchKey: String =
-        "${method.displayName} $displayPath $className $functionName".lowercase()
+        "${method.displayName} $displayPath $className $functionName $packageName $routeGroupName $routeName".lowercase()
 
     val displayText: String
         get() = "${method.displayName.padEnd(7)} $displayPath"

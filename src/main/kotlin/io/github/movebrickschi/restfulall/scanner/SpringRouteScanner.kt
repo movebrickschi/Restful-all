@@ -23,14 +23,20 @@ class SpringRouteScanner : RouteScanner {
         val lines = content.lines()
         val commentMap = CommentFilter.buildCommentMap(lines, CommentFilter.Language.C_STYLE)
         val routes = mutableListOf<RouteInfo>()
+        val packageName = PACKAGE_PATTERN.find(content)?.groupValues?.get(1).orEmpty()
 
         var classPrefix = ""
         var className = ""
+        var routeGroupName = ""
+        var routeName = ""
         var isController = false
 
         for ((index, line) in lines.withIndex()) {
             if (commentMap[index]) continue
             val trimmed = line.trim()
+
+            extractRouteGroupName(trimmed)?.let { routeGroupName = it }
+            extractRouteName(trimmed)?.let { routeName = it }
 
             if (CONTROLLER_ANNOTATION.containsMatchIn(trimmed)) {
                 isController = true
@@ -44,6 +50,9 @@ class SpringRouteScanner : RouteScanner {
             val classMatch = CLASS_PATTERN.find(trimmed)
             if (classMatch != null && isController) {
                 className = classMatch.groupValues[1]
+                if (routeGroupName.isBlank()) {
+                    routeGroupName = className
+                }
             }
 
             if (!isController) continue
@@ -65,8 +74,12 @@ class SpringRouteScanner : RouteScanner {
                         file = file,
                         lineNumber = index,
                         framework = Framework.SPRING,
+                        packageName = packageName,
+                        routeGroupName = routeGroupName.ifBlank { className },
+                        routeName = routeName.ifBlank { functionName },
                     )
                 )
+                routeName = ""
                 continue
             }
 
@@ -87,8 +100,12 @@ class SpringRouteScanner : RouteScanner {
                         file = file,
                         lineNumber = index,
                         framework = Framework.SPRING,
+                        packageName = packageName,
+                        routeGroupName = routeGroupName.ifBlank { className },
+                        routeName = routeName.ifBlank { functionName },
                     )
                 )
+                routeName = ""
             }
         }
 
@@ -140,9 +157,39 @@ class SpringRouteScanner : RouteScanner {
         }
     }
 
+    private fun extractRouteGroupName(line: String): String? {
+        val tagName = TAG_NAME_PATTERN.find(line)?.groupValues?.get(1)
+        if (!tagName.isNullOrBlank()) return tagName
+
+        val apiName = API_GROUP_PATTERN.find(line)?.groupValues?.get(1)
+        if (!apiName.isNullOrBlank()) return apiName
+
+        return null
+    }
+
+    private fun extractRouteName(line: String): String? {
+        val operationSummary = OPERATION_SUMMARY_PATTERN.find(line)?.groupValues?.get(1)
+        if (!operationSummary.isNullOrBlank()) return operationSummary
+
+        val apiOperationValue = API_OPERATION_VALUE_PATTERN.find(line)?.groupValues?.get(1)
+        if (!apiOperationValue.isNullOrBlank()) return apiOperationValue
+
+        return null
+    }
+
     companion object {
+        private val PACKAGE_PATTERN =
+            Regex("""(?m)^\s*package\s+([A-Za-z_][\w.]*)(?:\s*;)?""")
         private val CONTROLLER_ANNOTATION =
             Regex("""@(?:RestController|Controller)\b""")
+        private val TAG_NAME_PATTERN =
+            Regex("""@Tag\s*\([^)]*name\s*=\s*["']([^"']+)["']""")
+        private val API_GROUP_PATTERN =
+            Regex("""@Api\s*\([^)]*(?:tags|value)\s*=\s*(?:\{\s*)?["']([^"']+)["']""")
+        private val OPERATION_SUMMARY_PATTERN =
+            Regex("""@Operation\s*\([^)]*summary\s*=\s*["']([^"']+)["']""")
+        private val API_OPERATION_VALUE_PATTERN =
+            Regex("""@ApiOperation\s*\([^)]*(?:value|notes)\s*=\s*["']([^"']+)["']""")
         private val REQUEST_MAPPING_VALUE =
             Regex("""@RequestMapping\s*\(\s*(?:value\s*=\s*)?["']([^"']*)["']""")
         private val SHORTCUT_MAPPING_PATTERN =

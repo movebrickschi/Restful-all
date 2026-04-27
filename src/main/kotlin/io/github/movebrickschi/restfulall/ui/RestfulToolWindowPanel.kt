@@ -1,5 +1,6 @@
 package io.github.movebrickschi.restfulall.ui
 
+import com.intellij.icons.AllIcons
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBSplitter
@@ -10,9 +11,11 @@ import io.github.movebrickschi.restfulall.service.LanguageChangeListener
 import io.github.movebrickschi.restfulall.service.PluginSettingsState
 import java.awt.BorderLayout
 import java.awt.CardLayout
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
 import javax.swing.DefaultComboBoxModel
+import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JPanel
 
@@ -30,6 +33,18 @@ class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout
     private val languageLabel = com.intellij.ui.components.JBLabel()
     private val languageCombo = JComboBox<LanguageItem>().apply {
         preferredSize = Dimension(130, 26)
+    }
+    private val refreshRoutesButton = createHeaderIconButton(AllIcons.Actions.Refresh) {
+        routeListPanel.refreshRoutes()
+    }
+    private val exportRoutesButton = createHeaderIconButton(AllIcons.Actions.MenuSaveall) {
+        routeListPanel.exportApiDocument()
+    }
+    private val expandSelectedButton = createHeaderIconButton(AllIcons.Actions.Expandall) {
+        routeListPanel.expandSelectedDirectory()
+    }
+    private val collapseSelectedButton = createHeaderIconButton(AllIcons.Actions.Collapseall) {
+        routeListPanel.collapseSelectedDirectory()
     }
     private val headerBar = JPanel(BorderLayout()).apply {
         border = JBUI.Borders.empty(2, 4, 2, 4)
@@ -62,7 +77,25 @@ class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout
             .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener { applyI18n() })
     }
 
+    private fun createHeaderIconButton(icon: javax.swing.Icon, onClick: () -> Unit): JButton =
+        JButton(icon).apply {
+            isBorderPainted = false
+            isContentAreaFilled = false
+            isFocusable = false
+            margin = JBUI.emptyInsets()
+            preferredSize = Dimension(28, 28)
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            addActionListener { onClick() }
+        }
+
     private fun buildHeaderBar() {
+        val left = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
+        left.add(refreshRoutesButton)
+        left.add(exportRoutesButton)
+        left.add(expandSelectedButton)
+        left.add(collapseSelectedButton)
+        headerBar.add(left, BorderLayout.WEST)
+
         val right = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0))
         right.add(languageLabel)
         right.add(languageCombo)
@@ -77,6 +110,10 @@ class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout
 
     private fun applyI18n() {
         languageLabel.text = MyMessageBundle.message("language.combo.label") + ":"
+        refreshRoutesButton.toolTipText = MyMessageBundle.message("route.list.refresh.tooltip")
+        exportRoutesButton.toolTipText = MyMessageBundle.message("route.list.export.tooltip")
+        expandSelectedButton.toolTipText = MyMessageBundle.message("route.list.action.expand.selected")
+        collapseSelectedButton.toolTipText = MyMessageBundle.message("route.list.action.collapse.selected")
 
         val current = PluginSettingsState.getInstance(project).getLanguage()
         val items = listOf(

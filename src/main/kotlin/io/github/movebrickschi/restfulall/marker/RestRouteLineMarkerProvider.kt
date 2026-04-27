@@ -9,11 +9,12 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
+import com.intellij.util.Function
 import io.github.movebrickschi.restfulall.MyMessageBundle
+import io.github.movebrickschi.restfulall.license.LicenseManager
 import io.github.movebrickschi.restfulall.model.RouteInfo
 import io.github.movebrickschi.restfulall.service.RestfulToolWindowHolder
 import io.github.movebrickschi.restfulall.service.RouteService
-import com.intellij.util.Function
 import javax.swing.Icon
 
 class RestRouteLineMarkerProvider : LineMarkerProviderDescriptor() {
@@ -75,6 +76,7 @@ class RestRouteLineMarkerProvider : LineMarkerProviderDescriptor() {
     }
 
     private fun openInDebugPanel(project: Project, route: RouteInfo) {
+        if (!LicenseManager.requirePro(project, "gutter_debug")) return
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID) ?: return
         toolWindow.activate({
             val holder = RestfulToolWindowHolder.getInstance(project)

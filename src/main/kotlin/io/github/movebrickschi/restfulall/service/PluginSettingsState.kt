@@ -51,9 +51,6 @@ class PluginSettingsState : PersistentStateComponent<PluginSettingsState.State> 
         var recentSearchQueries: MutableList<String> = mutableListOf(),
         var pinnedQuickFilters: MutableList<String> = mutableListOf(),
 
-        // v1.1 - License
-        var licenseInstalledAt: Long = 0L,
-
         // v1.2 - 每日小报快照（routeKey -> hash）
         @get:OptionTag(tag = "lastRouteSnapshot")
         var lastRouteSnapshot: MutableMap<String, String> = mutableMapOf(),
@@ -65,6 +62,12 @@ class PluginSettingsState : PersistentStateComponent<PluginSettingsState.State> 
 
         // v1.2 - 年报里程碑提示（最近一次触发的阈值，避免重复通知）
         var lastTeaserAt: Int = 0,
+
+        // v1.2 - API 文档导出偏好
+        var lastExportFormat: String = "OPENAPI_JSON",
+        var lastExportTitle: String = "",
+        var lastExportVersion: String = "1.0.0",
+        var lastExportDescription: String = "",
     )
 
     override fun getState(): State = myState
@@ -261,15 +264,6 @@ class PluginSettingsState : PersistentStateComponent<PluginSettingsState.State> 
 
     fun setPinnedQuickFilters(filters: List<String>) {
         myState.pinnedQuickFilters = filters.toMutableList()
-    }
-
-    // ---------- v1.1 - License ----------
-
-    fun getLicenseInstalledAt(): Long {
-        if (myState.licenseInstalledAt == 0L) {
-            myState.licenseInstalledAt = System.currentTimeMillis()
-        }
-        return myState.licenseInstalledAt
     }
 
     // ---------- v1.2 - 每日小报 ----------

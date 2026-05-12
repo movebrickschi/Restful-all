@@ -17,6 +17,15 @@ import io.github.movebrickschi.restfulall.service.RestfulToolWindowHolder
 import io.github.movebrickschi.restfulall.service.RouteService
 import javax.swing.Icon
 
+private const val ROUTE_ANCHOR_MAX_LENGTH = 64
+
+internal fun isPotentialRouteAnchorText(text: CharSequence?): Boolean {
+    if (text.isNullOrEmpty()) return false
+    if (text.length > ROUTE_ANCHOR_MAX_LENGTH) return false
+    val first = text[0]
+    return first == '@' || first == '_' || first.isLetter()
+}
+
 class RestRouteLineMarkerProvider : LineMarkerProviderDescriptor() {
 
     override fun getName(): String = MyMessageBundle.message("marker.test.route.name")
@@ -25,6 +34,7 @@ class RestRouteLineMarkerProvider : LineMarkerProviderDescriptor() {
 
     override fun getLineMarkerInfo(element: PsiElement): LineMarkerInfo<*>? {
         if (element.firstChild != null) return null
+        if (!isPotentialRouteAnchorText(element.text)) return null
 
         val containingFile = element.containingFile ?: return null
         val virtualFile = containingFile.virtualFile ?: return null

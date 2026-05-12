@@ -10,14 +10,7 @@ class NestJsRouteScanner : RouteScanner {
 
     override fun supportedExtensions(): Set<String> = setOf("ts", "tsx")
 
-    override fun scanFile(file: VirtualFile): List<RouteInfo> {
-        val content = try {
-            String(file.contentsToByteArray(), Charsets.UTF_8)
-        } catch (e: Exception) {
-            LOG.warn("Failed to read file: ${file.path}", e)
-            return emptyList()
-        }
-
+    override fun scanFile(file: VirtualFile, content: String): List<RouteInfo> {
         if (!content.contains("@Controller")) return emptyList()
 
         LOG.debug("Scanning NestJS file: ${file.path}")
@@ -43,11 +36,13 @@ class NestJsRouteScanner : RouteScanner {
                 continue
             }
 
-            if (CONTROLLER_NO_ARG_PATTERN.find(trimmed) != null) {
+            if (CONTROLLER_NO_ARG_PATTERN.find(trimmed) != null ||
+                CONTROLLER_BARE_PATTERN.find(trimmed) != null
+            ) {
                 controllerPrefix = ""
                 inController = true
                 className = findClassName(lines, index)
-                LOG.debug("  Found @Controller() -> $className at line $index")
+                LOG.debug("  Found bare/empty @Controller -> $className at line $index")
                 continue
             }
 
@@ -121,6 +116,10 @@ class NestJsRouteScanner : RouteScanner {
             Regex("""@Controller\s*\(\s*['"]([^'"]*)['"]\s*\)""")
         private val CONTROLLER_NO_ARG_PATTERN =
             Regex("""@Controller\s*\(\s*\)""")
+        // Matches `@Controller` written without parentheses, e.g. `@Controller export class X {}`.
+        // The negative lookahead avoids matching `@Controller(`/`@ControllerXyz`.
+        private val CONTROLLER_BARE_PATTERN =
+            Regex("""@Controller(?![\w(])""")
         private val METHOD_PATTERN =
             Regex("""@(Get|Post|Put|Delete|Patch|Head|Options|All)\s*\(\s*(?:['"]([^'"]*)['"]\s*)?\)""")
         private val CLASS_PATTERN =

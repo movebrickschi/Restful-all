@@ -12,13 +12,7 @@ class PythonRouteScanner : RouteScanner {
 
     override fun supportedExtensions(): Set<String> = setOf("py")
 
-    override fun scanFile(file: VirtualFile): List<RouteInfo> {
-        val content = try {
-            String(file.contentsToByteArray(), Charsets.UTF_8)
-        } catch (_: Exception) {
-            return emptyList()
-        }
-
+    override fun scanFile(file: VirtualFile, content: String): List<RouteInfo> {
         if (!content.contains(".get(") && !content.contains(".post(") &&
             !content.contains(".route(") && !content.contains(".put(") &&
             !content.contains(".delete(") && !content.contains(".patch(")

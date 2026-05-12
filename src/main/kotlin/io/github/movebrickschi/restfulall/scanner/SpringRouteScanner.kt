@@ -9,13 +9,7 @@ class SpringRouteScanner : RouteScanner {
 
     override fun supportedExtensions(): Set<String> = setOf("java", "kt")
 
-    override fun scanFile(file: VirtualFile): List<RouteInfo> {
-        val content = try {
-            String(file.contentsToByteArray(), Charsets.UTF_8)
-        } catch (_: Exception) {
-            return emptyList()
-        }
-
+    override fun scanFile(file: VirtualFile, content: String): List<RouteInfo> {
         if (!content.contains("@RestController") && !content.contains("@Controller") &&
             !content.contains("@RequestMapping") && !content.contains("Mapping(")
         ) return emptyList()

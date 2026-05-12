@@ -9,13 +9,7 @@ class ExpressRouteScanner : RouteScanner {
 
     override fun supportedExtensions(): Set<String> = setOf("ts", "tsx", "js", "jsx")
 
-    override fun scanFile(file: VirtualFile): List<RouteInfo> {
-        val content = try {
-            String(file.contentsToByteArray(), Charsets.UTF_8)
-        } catch (_: Exception) {
-            return emptyList()
-        }
-
+    override fun scanFile(file: VirtualFile, content: String): List<RouteInfo> {
         if (!content.contains("router.") && !content.contains("app.")) return emptyList()
 
         val lines = content.lines()
@@ -47,7 +41,12 @@ class ExpressRouteScanner : RouteScanner {
 
     private fun extractHandlerName(line: String, routeMatch: MatchResult): String? {
         val afterPath = line.substring(routeMatch.range.last + 1)
-        val handlerMatch = HANDLER_NAME_PATTERN.find(afterPath)
+        val rest = afterPath.trimStart(',', ' ', '\t')
+        // Inline anonymous handlers: `() => ...`, `(req, res) => ...`, `function () {}`.
+        // Return null so caller substitutes "anonymous" instead of grabbing the first
+        // parameter name (which used to surface as `req`).
+        if (rest.startsWith("(") || INLINE_FUNCTION_PATTERN.containsMatchIn(rest)) return null
+        val handlerMatch = HANDLER_NAME_PATTERN.find(rest)
         return handlerMatch?.groupValues?.get(1)
     }
 
@@ -56,5 +55,7 @@ class ExpressRouteScanner : RouteScanner {
             Regex("""(?:router|app)\.(get|post|put|delete|patch|head|options|all)\s*\(\s*['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE)
         private val HANDLER_NAME_PATTERN =
             Regex("""\b(\w+)\b""")
+        private val INLINE_FUNCTION_PATTERN =
+            Regex("""^function\s*\(""")
     }
 }

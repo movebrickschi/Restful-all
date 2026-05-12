@@ -94,6 +94,17 @@ object LicenseManager {
             "theme" -> MyMessageBundle.message("license.feature.theme")
             "year_report" -> MyMessageBundle.message("license.feature.year_report")
             "gutter_debug" -> MyMessageBundle.message("license.feature.gutter_debug")
+            "ai_param_fill" -> MyMessageBundle.message("license.feature.ai_param_fill")
+            "ai_diagnose" -> MyMessageBundle.message("license.feature.ai_diagnose")
+            "ai_test_case" -> MyMessageBundle.message("license.feature.ai_test_case")
+            "workspace_sync" -> MyMessageBundle.message("license.feature.workspace_sync")
+            "team_share" -> MyMessageBundle.message("license.feature.team_share")
+            "mock_server" -> MyMessageBundle.message("license.feature.mock_server")
+            "bidir_sync" -> MyMessageBundle.message("license.feature.bidir_sync")
+            "press_test" -> MyMessageBundle.message("license.feature.press_test")
+            "case_chain" -> MyMessageBundle.message("license.feature.case_chain")
+            "env_diff" -> MyMessageBundle.message("license.feature.env_diff")
+            "sign_plugin" -> MyMessageBundle.message("license.feature.sign_plugin")
             else -> featureKey
         }
     }

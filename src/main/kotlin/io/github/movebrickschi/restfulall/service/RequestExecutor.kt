@@ -213,12 +213,13 @@ class RequestExecutor(private val project: Project) {
 
     private fun resolveVariables(input: String): String {
         if (!input.contains("\${")) return input
-        return try {
+        val envResolved = try {
             EnvironmentService.getInstance(project).resolve(input)
         } catch (e: Exception) {
-            thisLogger().debug("Variable resolve failed: ${e.message}")
+            thisLogger().debug("Env variable resolve failed: ${e.message}")
             input
         }
+        return BuiltinVariableResolver.resolve(envResolved)
     }
 
     private fun decompressIfNeeded(stream: InputStream, headers: HttpHeaders): InputStream {

@@ -12,6 +12,8 @@ object ApplicationLanguageHolder {
     const val LANG_AUTO = "AUTO"
     const val LANG_ZH_CN = "ZH_CN"
     const val LANG_EN = "EN"
+    const val LANG_JA = "JA"
+    const val LANG_KO = "KO"
 
     private val current = AtomicReference(LANG_AUTO)
 
@@ -19,6 +21,8 @@ object ApplicationLanguageHolder {
         val normalized = when (language.uppercase()) {
             LANG_ZH_CN -> LANG_ZH_CN
             LANG_EN    -> LANG_EN
+            LANG_JA    -> LANG_JA
+            LANG_KO    -> LANG_KO
             else       -> LANG_AUTO
         }
         current.set(normalized)
@@ -32,6 +36,8 @@ object ApplicationLanguageHolder {
     fun overrideLocale(): Locale? = when (current.get()) {
         LANG_ZH_CN -> Locale.SIMPLIFIED_CHINESE
         LANG_EN    -> Locale.ENGLISH
+        LANG_JA    -> Locale.JAPANESE
+        LANG_KO    -> Locale.KOREAN
         else       -> null
     }
 }

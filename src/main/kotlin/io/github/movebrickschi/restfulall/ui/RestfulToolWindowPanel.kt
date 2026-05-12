@@ -26,6 +26,7 @@ class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout
         apiDebugPanel.loadRoute(routeInfo)
     }
     val requestHistoryPanel = RequestHistoryPanel(project)
+    val environmentPanel = EnvironmentPanel(project)
 
     private val listCardLayout = CardLayout()
     private val listCardPanel = JPanel(listCardLayout)
@@ -55,6 +56,7 @@ class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout
     init {
         listCardPanel.add(routeListPanel, CARD_ROUTES)
         listCardPanel.add(requestHistoryPanel, CARD_HISTORY)
+        listCardPanel.add(environmentPanel, CARD_ENVIRONMENT)
 
         requestHistoryPanel.setOnLoadToDebug { entry ->
             apiDebugPanel.loadHistoryEntry(entry)
@@ -120,6 +122,8 @@ class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout
             LanguageItem(ApplicationLanguageHolder.LANG_AUTO, MyMessageBundle.message("language.auto")),
             LanguageItem(ApplicationLanguageHolder.LANG_ZH_CN, MyMessageBundle.message("language.zh.cn")),
             LanguageItem(ApplicationLanguageHolder.LANG_EN, MyMessageBundle.message("language.en")),
+            LanguageItem(ApplicationLanguageHolder.LANG_JA, "日本語"),
+            LanguageItem(ApplicationLanguageHolder.LANG_KO, "한국어"),
         )
         suppressLanguageEvent = true
         try {
@@ -144,8 +148,14 @@ class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout
         override fun toString(): String = label
     }
 
+    fun showEnvironment() {
+        environmentPanel.refreshEnvList()
+        listCardLayout.show(listCardPanel, CARD_ENVIRONMENT)
+    }
+
     companion object {
         private const val CARD_ROUTES = "routes"
         private const val CARD_HISTORY = "history"
+        private const val CARD_ENVIRONMENT = "environment"
     }
 }

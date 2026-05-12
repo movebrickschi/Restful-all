@@ -20,11 +20,15 @@ import io.github.movebrickschi.restfulall.model.Framework
 import io.github.movebrickschi.restfulall.model.ParamEntry
 import io.github.movebrickschi.restfulall.model.RequestHistoryEntry
 import io.github.movebrickschi.restfulall.model.RouteInfo
+import io.github.movebrickschi.restfulall.model.AuthConfig
+import io.github.movebrickschi.restfulall.service.AuthService
+import io.github.movebrickschi.restfulall.service.CurlConverter
 import io.github.movebrickschi.restfulall.service.ExpressParamExtractor
 import io.github.movebrickschi.restfulall.service.LanguageChangeListener
 import io.github.movebrickschi.restfulall.service.NestJsParamExtractor
 import io.github.movebrickschi.restfulall.service.PluginSettingsState
 import io.github.movebrickschi.restfulall.service.PythonParamExtractor
+import io.github.movebrickschi.restfulall.service.RequestSpec
 import io.github.movebrickschi.restfulall.service.SpringPsiParamExtractor
 import java.awt.BorderLayout
 import java.awt.CardLayout
@@ -57,6 +61,28 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val methodCombo = JComboBox(arrayOf("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"))
     private val urlField = JBTextField()
     private val sendButton = JButton()
+
+    private val curlImportButton = JButton(AllIcons.ToolbarDecorator.Import).apply {
+        isBorderPainted = false; isContentAreaFilled = false
+        preferredSize = Dimension(28, 28)
+        toolTipText = "Import cURL"
+    }
+    private val curlExportButton = JButton(AllIcons.ToolbarDecorator.Export).apply {
+        isBorderPainted = false; isContentAreaFilled = false
+        preferredSize = Dimension(28, 28)
+        toolTipText = "Copy as cURL"
+    }
+
+    private var currentAuthConfig = AuthConfig()
+    private val authTypeCombo = JComboBox(AuthConfig.AuthType.entries.toTypedArray())
+    private val authBearerField = JBTextField()
+    private val authBasicUserField = JBTextField()
+    private val authBasicPassField = JPasswordField()
+    private val authApiKeyNameField = JBTextField()
+    private val authApiKeyValueField = JBTextField()
+    private val authApiKeyLocationCombo = JComboBox(AuthConfig.ApiKeyLocation.entries.toTypedArray())
+    private val authCardLayout = CardLayout()
+    private val authCardPanel = JPanel(authCardLayout)
 
     private val queryParamPanel = ParamTablePanel()
     private val bodyTextArea = JsonSyntaxTextPane(editable = true)
@@ -156,7 +182,13 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                     }
                 }
             }
-            add(sendButton, BorderLayout.EAST)
+            curlImportButton.addActionListener { importFromCurl() }
+            curlExportButton.addActionListener { exportAsCurl() }
+            val rightBar = JPanel(FlowLayout(FlowLayout.RIGHT, 2, 0))
+            rightBar.add(curlImportButton)
+            rightBar.add(curlExportButton)
+            rightBar.add(sendButton)
+            add(rightBar, BorderLayout.EAST)
         }
         add(urlBar, BorderLayout.NORTH)
 
@@ -1225,6 +1257,53 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
             MyMessageBundle.message("debug.response.column.value")
         override fun getValueAt(rowIndex: Int, columnIndex: Int): Any =
             if (columnIndex == 0) data[rowIndex].first else data[rowIndex].second
+    }
+
+    // ── F2: cURL import / export ──────────────────────────────────────────────
+
+    private fun importFromCurl() {
+        val input = JOptionPane.showInputDialog(this, "Paste cURL command:", "Import cURL", JOptionPane.PLAIN_MESSAGE)
+        if (input.isNullOrBlank()) return
+        try {
+            val spec = CurlConverter.parse(input)
+            methodCombo.selectedItem = spec.method
+            urlField.text = spec.url
+            if (spec.bodyContent.isNotBlank()) {
+                bodyTextArea.text = spec.bodyContent
+                when (spec.bodyType) {
+                    "json" -> bodyTypeJson.isSelected = true
+                    "xml" -> bodyTypeXml.isSelected = true
+                    "raw" -> bodyTypeRaw.isSelected = true
+                }
+            }
+            headersPanel.setParams(spec.headers)
+            cookiesPanel.setParams(spec.cookies)
+        } catch (e: CurlConverter.CurlParseException) {
+            JOptionPane.showMessageDialog(this, "cURL parse error: ${e.message}", "Error", JOptionPane.ERROR_MESSAGE)
+        }
+    }
+
+    private fun exportAsCurl() {
+        val spec = buildCurrentRequestSpec()
+        val curl = CurlConverter.export(spec)
+        val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+        clipboard.setContents(java.awt.datatransfer.StringSelection(curl), null)
+        responseStatusLabel.text = "cURL copied to clipboard"
+    }
+
+    private fun buildCurrentRequestSpec(): RequestSpec {
+        val localQueryParams = queryParamPanel.getParams()
+        val localHeaders = headersPanel.getParams()
+        val localCookies = cookiesPanel.getParams()
+        return RequestSpec(
+            method = methodCombo.selectedItem as String,
+            url = urlField.text.trim(),
+            queryParams = localQueryParams,
+            headers = localHeaders,
+            cookies = localCookies,
+            bodyType = getSelectedBodyType(),
+            bodyContent = getBodyContent(),
+        )
     }
 
     companion object {

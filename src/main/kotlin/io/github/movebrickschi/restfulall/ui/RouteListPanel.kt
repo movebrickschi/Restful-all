@@ -1,6 +1,7 @@
 package io.github.movebrickschi.restfulall.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
@@ -43,7 +44,7 @@ class RouteListPanel(
     private val project: Project,
     private val loadInitialRoutes: Boolean = true,
     private val onDebugRoute: (RouteInfo) -> Unit,
-) : JPanel(BorderLayout()) {
+) : JPanel(BorderLayout()), Disposable {
 
     private val allRoutes = mutableListOf<RouteInfo>()
     private val filteredRoutes = mutableListOf<RouteInfo>()
@@ -73,8 +74,12 @@ class RouteListPanel(
         }
 
         ApplicationManager.getApplication().messageBus
-            .connect(project)
+            .connect(this)
             .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener { applyI18n() })
+    }
+
+    override fun dispose() {
+        debounceTimer.stop()
     }
 
     private fun setupToolbar() {

@@ -1,6 +1,7 @@
 package io.github.movebrickschi.restfulall.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
@@ -26,7 +27,7 @@ import javax.swing.*
 import javax.swing.table.AbstractTableModel
 import javax.swing.table.DefaultTableCellRenderer
 
-class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
+class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
     private val entries = mutableListOf<BaseUrlEntry>()
     private val tableModel = BaseUrlTableModel()
@@ -50,9 +51,11 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
         applyI18n()
 
         ApplicationManager.getApplication().messageBus
-            .connect(project)
+            .connect(this)
             .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener { applyI18n() })
     }
+
+    override fun dispose() = Unit
 
     private fun setupUI() {
         val toolbar = JPanel(BorderLayout(2, 0)).apply {

@@ -48,6 +48,7 @@ class RouteService(private val project: Project) : Disposable {
     private val routesRef = AtomicReference<Map<String, List<RouteInfo>>>(emptyMap())
     private val initialScanDone = AtomicBoolean(false)
     private val scanning = AtomicBoolean(false)
+    private val disposed = AtomicBoolean(false)
 
     /**
      * \[v1.3.1] VFS 增量扫描专用有界 executor（最大并发 = [INCREMENTAL_SCAN_MAX_PARALLEL]）。
@@ -94,14 +95,17 @@ class RouteService(private val project: Project) : Disposable {
                     }
 
                     incrementalScanExecutor.execute {
+                        if (disposed.get()) return@execute
                         val updates = HashMap<String, List<RouteInfo>>(filesToRescan.size)
                         for (file in filesToRescan) {
+                            if (disposed.get()) return@execute
                             if (!file.isValid) continue
                             val newRoutes = ReadAction.compute<List<RouteInfo>, Throwable> {
                                 scanSingleFile(file)
                             }
                             updates[file.path] = newRoutes
                         }
+                        if (disposed.get()) return@execute
                         applyIncrementalUpdate(updates, deletedPaths)
                     }
                 }
@@ -330,6 +334,7 @@ class RouteService(private val project: Project) : Disposable {
     }
 
     override fun dispose() {
+        disposed.set(true)
         LOG.debug("RouteService disposed for project: ${project.name}")
     }
 

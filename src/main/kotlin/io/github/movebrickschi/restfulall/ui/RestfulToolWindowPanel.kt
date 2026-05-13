@@ -1,6 +1,7 @@
 package io.github.movebrickschi.restfulall.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBSplitter
@@ -19,7 +20,7 @@ import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JPanel
 
-class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout()) {
+class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
     val apiDebugPanel = ApiDebugPanel(project)
     private val routeListPanel = RouteListPanel(project) { routeInfo ->
@@ -75,8 +76,14 @@ class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout
         applyI18n()
 
         ApplicationManager.getApplication().messageBus
-            .connect(project)
+            .connect(this)
             .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener { applyI18n() })
+    }
+
+    override fun dispose() {
+        routeListPanel.dispose()
+        requestHistoryPanel.dispose()
+        apiDebugPanel.dispose()
     }
 
     private fun createHeaderIconButton(icon: javax.swing.Icon, onClick: () -> Unit): JButton =

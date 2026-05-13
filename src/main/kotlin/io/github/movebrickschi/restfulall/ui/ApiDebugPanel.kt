@@ -4,6 +4,7 @@ import com.intellij.icons.AllIcons
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.ui.JBColor
@@ -53,7 +54,7 @@ import javax.swing.*
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
-class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
+class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
     private val methodCombo = JComboBox(arrayOf("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"))
     private val urlField = JBTextField()
@@ -155,8 +156,13 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         applyI18n()
 
         ApplicationManager.getApplication().messageBus
-            .connect(project)
+            .connect(this)
             .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener { applyI18n() })
+    }
+
+    override fun dispose() {
+        stopSseStream()
+        disconnectWebSocket()
     }
 
     private fun setupUI() {

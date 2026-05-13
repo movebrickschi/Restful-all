@@ -28,15 +28,24 @@ class MyToolWindowFactory : ToolWindowFactory {
 
         val interfaceContent = contentFactory.createContent(routesWrapper, MyMessageBundle.message("tab.interface"), false).apply {
             isCloseable = false
+            setDisposer(mainPanel)
         }
         val historyContent = contentFactory.createContent(historyWrapper, MyMessageBundle.message("tab.request.history"), false).apply {
             isCloseable = false
         }
-        val baseUrlContent = contentFactory.createContent(BaseUrlPanel(project), MyMessageBundle.message("tab.base.url"), false).apply {
+        val baseUrlPanel = BaseUrlPanel(project)
+        val globalParamsPanel = GlobalParamsPanel(project)
+        val baseUrlContent = contentFactory.createContent(baseUrlPanel, MyMessageBundle.message("tab.base.url"), false).apply {
             isCloseable = false
+            setDisposer(baseUrlPanel)
         }
-        val globalParamsContent = contentFactory.createContent(GlobalParamsPanel(project), MyMessageBundle.message("tab.global.params"), false).apply {
+        val globalParamsContent = contentFactory.createContent(
+            globalParamsPanel,
+            MyMessageBundle.message("tab.global.params"),
+            false,
+        ).apply {
             isCloseable = false
+            setDisposer(globalParamsPanel)
         }
 
         toolWindow.contentManager.addContent(interfaceContent)
@@ -74,7 +83,7 @@ class MyToolWindowFactory : ToolWindowFactory {
             globalParamsContent to "tab.global.params",
         )
         ApplicationManager.getApplication().messageBus
-            .connect(project)
+            .connect(mainPanel)
             .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener {
                 refreshTabTitles(tabBindings)
             })

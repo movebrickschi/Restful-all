@@ -1,6 +1,7 @@
 package io.github.movebrickschi.restfulall.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.ui.components.JBScrollPane
@@ -25,7 +26,7 @@ import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeCellRenderer
 import javax.swing.tree.DefaultTreeModel
 
-class RequestHistoryPanel(private val project: Project) : JPanel(BorderLayout()) {
+class RequestHistoryPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
     private val searchField = JBTextField()
     private val treeModel = DefaultTreeModel(DefaultMutableTreeNode(MyMessageBundle.message("request.history.root")))
@@ -48,8 +49,13 @@ class RequestHistoryPanel(private val project: Project) : JPanel(BorderLayout())
         rebuildTree()
 
         ApplicationManager.getApplication().messageBus
-            .connect(project)
+            .connect(this)
             .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener { applyI18n() })
+    }
+
+    override fun dispose() {
+        debounceTimer.stop()
+        onLoadToDebug = null
     }
 
     fun setOnLoadToDebug(callback: (RequestHistoryEntry) -> Unit) {

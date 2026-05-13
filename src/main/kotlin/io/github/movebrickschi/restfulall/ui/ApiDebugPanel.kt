@@ -556,11 +556,27 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         val boundary = "----FormBoundary${UUID.randomUUID().toString().replace("-", "")}"
         val byteArrays = mutableListOf<ByteArray>()
         val lineBreak = "\r\n".toByteArray(StandardCharsets.UTF_8)
+        var runningSize = 0L
 
         for ((name, value, type) in params) {
             byteArrays.add("--$boundary\r\n".toByteArray(StandardCharsets.UTF_8))
             if (type == "file") {
                 val filePath = Path.of(value)
+                check(Files.isRegularFile(filePath)) {
+                    "Multipart file not found or not a regular file: $value"
+                }
+                check(Files.isReadable(filePath)) {
+                    "Multipart file not readable: $value"
+                }
+                val fileSize = Files.size(filePath)
+                check(fileSize <= MAX_MULTIPART_FILE_BYTES) {
+                    "Multipart file too large (${fileSize / 1024 / 1024} MB), max=${MAX_MULTIPART_FILE_BYTES / 1024 / 1024} MB: $value"
+                }
+                runningSize += fileSize
+                check(runningSize <= MAX_MULTIPART_TOTAL_BYTES) {
+                    "Multipart total body too large (>${MAX_MULTIPART_TOTAL_BYTES / 1024 / 1024} MB), please reduce file count"
+                }
+
                 val fileName = filePath.fileName.toString()
                 byteArrays.add(
                     "Content-Disposition: form-data; name=\"$name\"; filename=\"$fileName\"\r\n".toByteArray(StandardCharsets.UTF_8)
@@ -1313,6 +1329,9 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         private val WARN_COLOR = JBColor(Color(0xCC, 0x80, 0x00), Color(0xE5, 0xC0, 0x7B))
         private val ERROR_COLOR = JBColor(Color(0xCC, 0x00, 0x00), Color(0xE0, 0x6C, 0x75))
         private val WS_TIME_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
+
+        private const val MAX_MULTIPART_FILE_BYTES: Long = 50L * 1024 * 1024
+        private const val MAX_MULTIPART_TOTAL_BYTES: Long = 100L * 1024 * 1024
 
         private const val CARD_NONE = "none"
         private const val CARD_FORM_DATA = "form-data"

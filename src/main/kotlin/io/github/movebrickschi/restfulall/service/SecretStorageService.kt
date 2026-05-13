@@ -17,7 +17,8 @@ import com.intellij.openapi.project.Project
  *
  * ## 命名空间（namespace）设计
  *
- * 所有 key 均以 `restful-all:<namespace>:<suffix>` 格式生成，避免跨项目 / 跨功能碰撞。
+ * 所有 key 均以 `restful-all:<projectHash>:<namespace>:<suffix>` 格式生成，
+ * **强制按 project 隔离**，避免跨项目 envId / authConfigId 同名时被对方读到。
  *
  * | namespace | suffix 格式 | 用途 |
  * |-----------|------------|------|
@@ -25,6 +26,12 @@ import com.intellij.openapi.project.Project
  * | `auth`    | `<authConfigId>` | 鉴权模板的 token / password（F5） |
  * | `ai`      | `<provider>` | AI API Key（P0-1~3） |
  * | `sync`    | `<accountId>` | 云同步登录 token（P1-4） |
+ *
+ * ## 兼容性 / 迁移
+ *
+ * v1.3.1 起 key 增加 `<projectHash>` 维度。读取时若新 key 未命中，会自动 fallback 到
+ * 老格式 `restful-all:<namespace>:<suffix>`，命中后**写入新 key 并清掉老 key**，
+ * 实现首次访问即静默迁移；用户无感知。
  *
  * ## 线程安全
  *
@@ -61,8 +68,8 @@ class SecretStorageService(private val project: Project) {
      */
     fun setSecret(namespaceKey: String, value: String) {
         try {
-            val attr = createAttributes(namespaceKey)
-            PasswordSafe.instance.set(attr, Credentials(namespaceKey, value))
+            val scoped = scopedKey(namespaceKey)
+            PasswordSafe.instance.set(createAttributes(scoped), Credentials(scoped, value))
         } catch (e: Exception) {
             thisLogger().warn("SecretStorageService.setSecret failed for key=$namespaceKey", e)
         }
@@ -71,12 +78,35 @@ class SecretStorageService(private val project: Project) {
     /**
      * 读取密文。
      *
+     * 优先读项目隔离的新 key；未命中时尝试老 key（v1.3.0 留下的全局共享 key），
+     * 命中后透明迁移到新 key + 清掉老 key。
+     *
      * @return 明文值，或 null（未存储 / PasswordSafe 不可用 / 解密失败）。
      */
     fun getSecret(namespaceKey: String): String? {
         return try {
-            val attr = createAttributes(namespaceKey)
-            PasswordSafe.instance.get(attr)?.getPasswordAsString()
+            val scoped = scopedKey(namespaceKey)
+            val scopedAttr = createAttributes(scoped)
+            val scopedValue = PasswordSafe.instance.get(scopedAttr)?.getPasswordAsString()
+            if (scopedValue != null) return scopedValue
+
+            val legacyAttr = createAttributes(namespaceKey)
+            val legacyValue = PasswordSafe.instance.get(legacyAttr)?.getPasswordAsString()
+            if (legacyValue != null) {
+                try {
+                    PasswordSafe.instance.set(scopedAttr, Credentials(scoped, legacyValue))
+                    PasswordSafe.instance.set(legacyAttr, null)
+                    thisLogger().info(
+                        "SecretStorageService: migrated legacy secret for namespaceKey=$namespaceKey to project-scoped key",
+                    )
+                } catch (migrateEx: Exception) {
+                    thisLogger().warn(
+                        "SecretStorageService: legacy migrate failed for namespaceKey=$namespaceKey",
+                        migrateEx,
+                    )
+                }
+            }
+            legacyValue
         } catch (e: Exception) {
             thisLogger().warn("SecretStorageService.getSecret failed for key=$namespaceKey", e)
             null
@@ -86,14 +116,22 @@ class SecretStorageService(private val project: Project) {
     /**
      * 删除密文。
      *
+     * 同时清理新 / 老两份，避免老 key 残留导致下次 [getSecret] 误命中。
      * 如果该 key 不存在则静默返回。
      */
     fun removeSecret(namespaceKey: String) {
         try {
-            val attr = createAttributes(namespaceKey)
-            PasswordSafe.instance.set(attr, null)
+            PasswordSafe.instance.set(createAttributes(scopedKey(namespaceKey)), null)
         } catch (e: Exception) {
             thisLogger().warn("SecretStorageService.removeSecret failed for key=$namespaceKey", e)
+        }
+        try {
+            PasswordSafe.instance.set(createAttributes(namespaceKey), null)
+        } catch (e: Exception) {
+            thisLogger().warn(
+                "SecretStorageService.removeSecret legacy cleanup failed for key=$namespaceKey",
+                e,
+            )
         }
     }
 
@@ -115,6 +153,9 @@ class SecretStorageService(private val project: Project) {
         namespaceKeys.forEach { removeSecret(it) }
     }
 
-    private fun createAttributes(namespaceKey: String): CredentialAttributes =
-        CredentialAttributes(generateServiceName(SUBSYSTEM, namespaceKey))
+    private fun scopedKey(namespaceKey: String): String =
+        "${project.locationHash}:$namespaceKey"
+
+    private fun createAttributes(serviceKey: String): CredentialAttributes =
+        CredentialAttributes(generateServiceName(SUBSYSTEM, serviceKey))
 }

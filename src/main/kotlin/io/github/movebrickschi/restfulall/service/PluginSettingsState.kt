@@ -92,7 +92,8 @@ class PluginSettingsState : PersistentStateComponent<PluginSettingsState.State> 
     fun getRequestHistory(): MutableList<RequestHistoryEntry> = myState.requestHistory
 
     fun addHistoryEntry(entry: RequestHistoryEntry) {
-        myState.requestHistory.add(0, entry)
+        val safeEntry = SensitiveDataRedactor.redact(entry)
+        myState.requestHistory.add(0, safeEntry)
         if (myState.requestHistory.size > MAX_HISTORY_SIZE) {
             myState.requestHistory = myState.requestHistory.take(MAX_HISTORY_SIZE).toMutableList()
         }

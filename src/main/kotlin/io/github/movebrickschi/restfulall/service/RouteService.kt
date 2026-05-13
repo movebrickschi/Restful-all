@@ -267,6 +267,10 @@ class RouteService(private val project: Project) : Disposable {
                 val scannerRoutes = scanner.scanFile(file, content)
                 routes.addAll(scannerRoutes)
                 metrics?.record(scanner.javaClass.simpleName, scannerRoutes.size)
+            } catch (pce: com.intellij.openapi.progress.ProcessCanceledException) {
+                throw pce
+            } catch (inre: com.intellij.openapi.project.IndexNotReadyException) {
+                throw inre
             } catch (e: Exception) {
                 LOG.warn("Failed to scan ${file.path} with ${scanner.javaClass.simpleName}", e)
             }
@@ -277,9 +281,13 @@ class RouteService(private val project: Project) : Disposable {
     private fun readFileContent(file: VirtualFile): String? {
         return try {
             LoadTextUtil.loadText(file).toString()
+        } catch (pce: com.intellij.openapi.progress.ProcessCanceledException) {
+            throw pce
         } catch (_: Throwable) {
             try {
                 String(file.contentsToByteArray(), Charsets.UTF_8)
+            } catch (pce: com.intellij.openapi.progress.ProcessCanceledException) {
+                throw pce
             } catch (e: Throwable) {
                 LOG.debug("Failed to read content: ${file.path}", e)
                 null

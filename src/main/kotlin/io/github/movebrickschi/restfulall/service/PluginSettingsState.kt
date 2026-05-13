@@ -73,8 +73,23 @@ class PluginSettingsState : PersistentStateComponent<PluginSettingsState.State> 
     override fun getState(): State = myState
 
     override fun loadState(state: State) {
-        myState = state
-        ApplicationLanguageHolder.set(myState.language)
+        try {
+            myState = state
+            val lang = myState.language.takeUnless { it.isNullOrBlank() }
+                ?: ApplicationLanguageHolder.LANG_AUTO
+            myState.language = lang
+            ApplicationLanguageHolder.set(lang)
+        } catch (e: Exception) {
+            com.intellij.openapi.diagnostic.Logger
+                .getInstance(PluginSettingsState::class.java)
+                .error(
+                    "Failed to load PluginSettingsState; falling back to defaults. " +
+                        "Corrupt restful-all.xml will be left in place but ignored this session.",
+                    e,
+                )
+            myState = State()
+            ApplicationLanguageHolder.set(ApplicationLanguageHolder.LANG_AUTO)
+        }
     }
 
     fun getBaseUrls(): MutableList<BaseUrlEntry> = myState.baseUrls

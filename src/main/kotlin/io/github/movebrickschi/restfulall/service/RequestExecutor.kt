@@ -191,7 +191,10 @@ class RequestExecutor(private val project: Project) {
 
             val bodyStream = decompressIfNeeded(response.body(), response.headers())
             val (bodyBytes, truncated) = IoSafetyUtil.readBoundedBytes(bodyStream, MAX_RESPONSE_BYTES)
-            val bodyString = String(bodyBytes, Charsets.UTF_8)
+            val charset = parseResponseCharset(respContentType) { name ->
+                thisLogger().info("Unknown response charset '$name', falling back to UTF-8")
+            }
+            val bodyString = String(bodyBytes, charset)
             val elapsed = System.currentTimeMillis() - startTime
 
             return RequestResult(
@@ -235,10 +238,40 @@ class RequestExecutor(private val project: Project) {
     }
 
     private fun decompressIfNeeded(stream: InputStream, headers: HttpHeaders): InputStream {
-        return when (headers.firstValue("content-encoding").orElse("").lowercase()) {
+        val encoding = headers.firstValue("content-encoding").orElse("").lowercase()
+        return when (encoding) {
+            "", "identity" -> stream
             "gzip" -> GZIPInputStream(stream)
             "deflate" -> InflaterInputStream(stream)
-            else -> stream
+            else -> throw java.io.IOException(
+                "Unsupported response content-encoding: '$encoding'. " +
+                    "Only gzip / deflate are decoded; consider sending Accept-Encoding to negotiate.",
+            )
         }
+    }
+
+}
+
+private val CHARSET_PATTERN = Regex("(?i)charset\\s*=\\s*([^;\\s]+)")
+
+/**
+ * 从 `Content-Type` 头中提取 `charset=` 子参数，缺失或无效时回落到 UTF-8。
+ * 解决之前硬编码 UTF-8 导致 GBK / GB2312 等中文 API 响应乱码的问题。
+ *
+ * @param contentType 完整 `Content-Type` header 值
+ * @param onUnknown 解析到 charset 名但 JVM 未支持时的回调（用于调用方记日志），默认 no-op
+ */
+internal fun parseResponseCharset(
+    contentType: String,
+    onUnknown: (String) -> Unit = {},
+): java.nio.charset.Charset {
+    if (contentType.isBlank()) return Charsets.UTF_8
+    val match = CHARSET_PATTERN.find(contentType) ?: return Charsets.UTF_8
+    val name = match.groupValues[1].trim().trim('"', '\'')
+    return try {
+        java.nio.charset.Charset.forName(name)
+    } catch (_: Exception) {
+        onUnknown(name)
+        Charsets.UTF_8
     }
 }

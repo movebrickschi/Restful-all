@@ -56,10 +56,32 @@ class EnvironmentService(private val project: Project) : PersistentStateComponen
     override fun getState(): EnvState = myState
 
     override fun loadState(state: EnvState) {
-        myState = state
-        if (myState.environments.isEmpty()) {
-            myState.environments.add(EnvironmentEntry.newDefault())
-            myState.activeId = EnvironmentEntry.DEFAULT_ID
+        try {
+            myState = state
+            if (myState.environments.isEmpty()) {
+                myState.environments.add(EnvironmentEntry.newDefault())
+                myState.activeId = EnvironmentEntry.DEFAULT_ID
+            }
+            val invalidSecrets = myState.environments.flatMap { env ->
+                env.activeVariables()
+                    .filter { it.secret && it.secretRefKey().isNullOrBlank() }
+                    .map { "${env.id}:${it.key}" }
+            }
+            if (invalidSecrets.isNotEmpty()) {
+                thisLogger().warn(
+                    "EnvironmentService.loadState: ${invalidSecrets.size} secret variable(s) " +
+                        "missing secretRefKey; will fall back to derived key on read. ids=$invalidSecrets",
+                )
+            }
+        } catch (e: Exception) {
+            thisLogger().error(
+                "Failed to load EnvironmentService state; resetting to a single Default environment.",
+                e,
+            )
+            myState = EnvState(
+                environments = mutableListOf(EnvironmentEntry.newDefault()),
+                activeId = EnvironmentEntry.DEFAULT_ID,
+            )
         }
     }
 

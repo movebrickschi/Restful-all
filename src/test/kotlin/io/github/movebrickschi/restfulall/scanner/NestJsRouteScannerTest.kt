@@ -289,4 +289,28 @@ class NestJsRouteScannerTest {
 
         assertEquals("Unknown", route.className)
     }
+
+    @Test
+    fun `populates description from jsdoc above Get`() {
+        val file = TestVirtualFile(
+            "doc.controller.ts",
+            """
+            import { Controller, Get } from '@nestjs/common';
+
+            @Controller('users')
+            export class UsersController {
+                /**
+                 * 查询用户
+                 * 详细介绍。
+                 */
+                @Get(':id')
+                find(@Param('id') id: string) {}
+            }
+            """.trimIndent(),
+        )
+
+        val route = NestJsRouteScanner().scanFile(file).single()
+
+        assertEquals("查询用户\n详细介绍。", route.description)
+    }
 }

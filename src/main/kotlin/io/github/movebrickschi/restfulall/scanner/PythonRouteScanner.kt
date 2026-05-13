@@ -40,6 +40,7 @@ class PythonRouteScanner : RouteScanner {
                         file = file,
                         lineNumber = index,
                         framework = Framework.PYTHON,
+                        description = DocCommentExtractor.extractPythonDocstring(lines, index),
                     )
                 )
                 continue
@@ -61,6 +62,7 @@ class PythonRouteScanner : RouteScanner {
                         file = file,
                         lineNumber = index,
                         framework = Framework.PYTHON,
+                        description = DocCommentExtractor.extractPythonDocstring(lines, index),
                     )
                 )
             }

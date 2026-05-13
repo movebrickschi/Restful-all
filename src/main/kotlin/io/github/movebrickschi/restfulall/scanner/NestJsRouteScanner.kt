@@ -66,6 +66,7 @@ class NestJsRouteScanner : RouteScanner {
                         file = file,
                         lineNumber = index,
                         framework = Framework.NESTJS,
+                        description = DocCommentExtractor.extractJavaDocAbove(lines, index),
                     )
                 )
             }

@@ -284,4 +284,24 @@ class PythonRouteScannerTest {
         val route = PythonRouteScanner().scanFile(file).single()
         assertEquals("/single-quoted", route.fullPath)
     }
+
+    @Test
+    fun `populates description from FastAPI route docstring`() {
+        val file = TestVirtualFile(
+            "documented.py",
+            """
+            from fastapi import FastAPI
+            app = FastAPI()
+
+            @app.get("/users")
+            def list_users():
+                ${'"'}${'"'}${'"'}查询用户列表。
+                支持按邮箱搜索。${'"'}${'"'}${'"'}
+                return []
+            """.trimIndent(),
+        )
+
+        val route = PythonRouteScanner().scanFile(file).single()
+        assertTrue("expected docstring populated, got=${route.description}", route.description?.contains("查询用户列表") == true)
+    }
 }

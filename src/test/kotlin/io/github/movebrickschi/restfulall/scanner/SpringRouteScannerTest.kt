@@ -145,4 +145,57 @@ class SpringRouteScannerTest {
 
         assertEquals("删除 API Key", route.routeName)
     }
+
+    @Test
+    fun `populates description from javadoc above shortcut mapping`() {
+        val file = TestVirtualFile(
+            "DocumentedController.java",
+            """
+            package com.huizhi.inherit.controller;
+
+            import org.springframework.web.bind.annotation.GetMapping;
+            import org.springframework.web.bind.annotation.RestController;
+
+            @RestController
+            class DocumentedController {
+                /**
+                 * 查询用户列表
+                 * 支持按邮箱模糊搜索。
+                 * @param keyword 关键词
+                 */
+                @GetMapping("/api/users")
+                public Object list() {
+                    return null;
+                }
+            }
+            """.trimIndent(),
+        )
+
+        val route = SpringRouteScanner().scanFile(file).single()
+
+        assertEquals("查询用户列表\n支持按邮箱模糊搜索。", route.description)
+    }
+
+    @Test
+    fun `description is null when no javadoc present`() {
+        val file = TestVirtualFile(
+            "PlainController.kt",
+            """
+            package com.huizhi.inherit.controller
+
+            import org.springframework.web.bind.annotation.GetMapping
+            import org.springframework.web.bind.annotation.RestController
+
+            @RestController
+            class PlainController {
+                @GetMapping("/api/plain")
+                fun plain(): Any = Unit
+            }
+            """.trimIndent(),
+        )
+
+        val route = SpringRouteScanner().scanFile(file).single()
+
+        assertEquals(null, route.description)
+    }
 }

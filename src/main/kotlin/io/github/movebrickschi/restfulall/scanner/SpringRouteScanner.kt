@@ -71,6 +71,7 @@ class SpringRouteScanner : RouteScanner {
                         packageName = packageName,
                         routeGroupName = routeGroupName.ifBlank { className },
                         routeName = routeName.ifBlank { functionName },
+                        description = DocCommentExtractor.extractJavaDocAbove(lines, index),
                     )
                 )
                 routeName = ""
@@ -97,6 +98,7 @@ class SpringRouteScanner : RouteScanner {
                         packageName = packageName,
                         routeGroupName = routeGroupName.ifBlank { className },
                         routeName = routeName.ifBlank { functionName },
+                        description = DocCommentExtractor.extractJavaDocAbove(lines, index),
                     )
                 )
                 routeName = ""

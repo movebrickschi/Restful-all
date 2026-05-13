@@ -32,6 +32,7 @@ class ExpressRouteScanner : RouteScanner {
                     file = file,
                     lineNumber = index,
                     framework = Framework.EXPRESS,
+                    description = DocCommentExtractor.extractJavaDocAbove(lines, index),
                 )
             )
         }

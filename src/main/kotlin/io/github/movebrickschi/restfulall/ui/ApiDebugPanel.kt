@@ -22,11 +22,13 @@ import io.github.movebrickschi.restfulall.model.ParamEntry
 import io.github.movebrickschi.restfulall.model.RequestHistoryEntry
 import io.github.movebrickschi.restfulall.model.RouteInfo
 import io.github.movebrickschi.restfulall.model.AuthConfig
+import io.github.movebrickschi.restfulall.service.AssertionEngine
 import io.github.movebrickschi.restfulall.service.AuthService
 import io.github.movebrickschi.restfulall.service.CurlConverter
 import io.github.movebrickschi.restfulall.service.ExpressParamExtractor
 import io.github.movebrickschi.restfulall.service.LanguageChangeListener
 import io.github.movebrickschi.restfulall.service.NestJsParamExtractor
+import io.github.movebrickschi.restfulall.service.OpenApiParamExtractor
 import io.github.movebrickschi.restfulall.service.PluginSettingsState
 import io.github.movebrickschi.restfulall.service.PythonParamExtractor
 import io.github.movebrickschi.restfulall.service.MultipartFormParam
@@ -59,6 +61,21 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
     private val methodCombo = JComboBox(arrayOf("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"))
     private val urlField = JBTextField()
     private val sendButton = JButton()
+
+    /** F10: URL 行下方的接口注释展示区。description 为 null/blank 时整块隐藏，避免占视觉。 */
+    private val descriptionArea = JTextArea().apply {
+        isEditable = false
+        isOpaque = false
+        lineWrap = true
+        wrapStyleWord = true
+        border = JBUI.Borders.empty(2, 4, 4, 4)
+        font = font.deriveFont(font.size2D - 1f)
+        foreground = JBColor(Color(0x70, 0x70, 0x70), Color(0x9D, 0x9D, 0x9D))
+    }
+    private val descriptionPanel = JPanel(BorderLayout()).apply {
+        isVisible = false
+        add(descriptionArea, BorderLayout.CENTER)
+    }
 
     private val curlImportButton = JButton(AllIcons.ToolbarDecorator.Import).apply {
         isBorderPainted = false; isContentAreaFilled = false
@@ -115,6 +132,12 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         }
     }
 
+    /** F7: 断言编辑/结果面板；持有最近一次响应快照供「重跑」按钮使用。 */
+    private val assertionPanel = AssertionTablePanel()
+
+    /** F7: 最近一次响应快照（body / statusCode / elapsed / headers），用于重跑断言。 */
+    private var lastResponseSnapshot: ResponseSnapshot? = null
+
     private val responseBodyArea = JsonSyntaxTextPane(editable = false)
     private val responseHeadersModel = ResponseTableModel()
     private val responseCookiesModel = ResponseTableModel()
@@ -155,6 +178,13 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         setupUI()
         applyI18n()
 
+        assertionPanel.onRerunRequested = {
+            val snap = lastResponseSnapshot
+            if (snap != null) {
+                runAssertionsWithSnapshot(snap.statusCode, snap.body, snap.headers, snap.elapsed)
+            }
+        }
+
         ApplicationManager.getApplication().messageBus
             .connect(this)
             .subscribe(LanguageChangeListener.TOPIC, LanguageChangeListener { applyI18n() })
@@ -193,7 +223,11 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
             rightBar.add(sendButton)
             add(rightBar, BorderLayout.EAST)
         }
-        add(urlBar, BorderLayout.NORTH)
+        val northStack = JPanel(BorderLayout()).apply {
+            add(urlBar, BorderLayout.NORTH)
+            add(descriptionPanel, BorderLayout.CENTER)
+        }
+        add(northStack, BorderLayout.NORTH)
 
         urlField.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent) = syncUrlMode()
@@ -239,6 +273,7 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
             addTab("Body", responseBodyPanel)
             addTab("Headers", JBScrollPane(responseHeadersTable))
             addTab("Cookies", JBScrollPane(responseCookiesTable))
+            addTab("Assertions", assertionPanel)
         }
 
         val responsePanel = JPanel(BorderLayout()).apply {
@@ -387,6 +422,8 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
             routeInfo.displayPath
         }
 
+        updateDescription(routeInfo.description)
+
         pathParamPanel.clear()
         queryParamPanel.clear()
         headersPanel.clear()
@@ -421,7 +458,37 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
             Framework.NESTJS -> NestJsParamExtractor.extract(routeInfo)
             Framework.EXPRESS -> ExpressParamExtractor.extract(routeInfo)
             Framework.PYTHON -> PythonParamExtractor.extract(routeInfo)
+            Framework.OPENAPI -> OpenApiParamExtractor.extract(project, routeInfo)
         }
+    }
+
+    /**
+     * F10: 刷新 URL 行下方的接口注释展示区。
+     *
+     * - `null` 或空白 → 隐藏整个 [descriptionPanel]
+     * - 非空 → 显示并触发父容器重排
+     *
+     * 调用方应在主线程触发；当前所有触发点（[loadRoute] / [loadHistoryEntry] / cURL 导入）
+     * 都在 EDT 上。
+     */
+    private fun updateDescription(text: String?) {
+        val cleaned = text?.trim().orEmpty()
+        if (cleaned.isEmpty()) {
+            if (descriptionPanel.isVisible) {
+                descriptionPanel.isVisible = false
+                descriptionPanel.revalidate()
+                descriptionPanel.repaint()
+            }
+            descriptionArea.text = ""
+            return
+        }
+        descriptionArea.text = cleaned
+        descriptionArea.caretPosition = 0
+        if (!descriptionPanel.isVisible) {
+            descriptionPanel.isVisible = true
+        }
+        descriptionPanel.revalidate()
+        descriptionPanel.repaint()
     }
 
     private fun populateFromExtraction(params: ExtractedMethodParams) {
@@ -467,6 +534,7 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
     fun loadHistoryEntry(entry: RequestHistoryEntry) {
         methodCombo.selectedItem = entry.method
         urlField.text = entry.url
+        updateDescription(null)
         queryParamPanel.setParams(entry.queryParams.map { it.name to it.value })
         headersPanel.setParams(entry.headers.map { it.name to it.value })
         cookiesPanel.setParams(entry.cookies.map { it.name to it.value })
@@ -636,7 +704,9 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         }
         val requestExecutor = RequestExecutor.getInstance(project)
 
-        val thread = Thread {
+        // 命名 daemon 线程：方便 jstack / Async Profiler 中识别 SSE/NDJSON 流读取线程，
+        // 且 isDaemon=true 避免 IDE 退出时还在等流读完。
+        val thread = Thread({
             var reconnectCount = 0
             var lastEventId: String? = null
 
@@ -732,7 +802,8 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
                 }
                 break@loop
             }
-        }
+        }, "Restful-SSE-${Integer.toHexString(finalUrl.hashCode())}")
+        thread.isDaemon = true
         sseThread = thread
         thread.start()
     }
@@ -1129,8 +1200,37 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         }
         responseCookiesModel.setData(cookieEntries)
 
+        runAssertionsWithSnapshot(statusCode, body, headers.map(), elapsed)
+
         responseTabs.selectedIndex = 0
     }
+
+    /**
+     * F7: 用最近一次响应跑一遍当前编辑中的断言，把结果展示到 [assertionPanel]。
+     * 也供 [AssertionTablePanel.onRerunRequested] 回调复用。
+     */
+    private fun runAssertionsWithSnapshot(
+        statusCode: Int,
+        body: String,
+        headers: Map<String, List<String>>,
+        elapsed: Long,
+    ) {
+        lastResponseSnapshot = ResponseSnapshot(statusCode, body, headers, elapsed)
+        val assertions = assertionPanel.getAssertions()
+        if (assertions.isEmpty()) {
+            assertionPanel.showResults(emptyList())
+            return
+        }
+        val results = AssertionEngine.evaluateAll(assertions, body, statusCode, elapsed, headers)
+        assertionPanel.showResults(results)
+    }
+
+    private data class ResponseSnapshot(
+        val statusCode: Int,
+        val body: String,
+        val headers: Map<String, List<String>>,
+        val elapsed: Long,
+    )
 
     private fun restoreResponseFromHistory(entry: RequestHistoryEntry) {
         val body = entry.responseBody
@@ -1203,6 +1303,7 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
             val spec = CurlConverter.parse(input)
             methodCombo.selectedItem = spec.method
             urlField.text = spec.url
+            updateDescription(null)
             if (spec.bodyContent.isNotBlank()) {
                 bodyTextArea.text = spec.bodyContent
                 when (spec.bodyType) {

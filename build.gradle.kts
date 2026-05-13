@@ -19,6 +19,14 @@ repositories {
 
 // Read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
 dependencies {
+    // F7: JSON Path 断言引擎；纯 Java、无 Kotlin/IDE 平台冲突。
+    implementation("com.jayway.jsonpath:json-path:2.9.0")
+
+    // F4: OpenAPI / Swagger 解析；只用核心 parser 类，避免 swagger-jaxrs2 等过重依赖。
+    implementation("io.swagger.parser.v3:swagger-parser-v3:2.1.22") {
+        exclude(group = "org.slf4j")
+    }
+
     testImplementation("junit:junit:4.13.2")
 
     intellijPlatform {

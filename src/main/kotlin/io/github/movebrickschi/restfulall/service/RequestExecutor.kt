@@ -67,7 +67,18 @@ data class RequestResult(
 @Service(Service.Level.PROJECT)
 class RequestExecutor(private val project: Project) {
 
+    /**
+     * \[v1.3.1] HttpClient 的 selector / async-callback executor。
+     *
+     * 默认 `HttpClient.newBuilder()` 走 ForkJoinPool common pool，遇到压测 / 短时间内大量
+     * sendAsync 时 NIO selector + reader 线程数会爆增，占满 common pool 影响 IDE 其它任务。
+     * 这里限制为 32 并发，对 IDE 内调试场景足够，且与 ForkJoinPool 解耦。
+     */
+    private val executor = com.intellij.util.concurrency.AppExecutorUtil
+        .createBoundedApplicationPoolExecutor("RestfulHttpClient", HTTP_CLIENT_PARALLELISM)
+
     private val httpClient: HttpClient = HttpClient.newBuilder()
+        .executor(executor)
         .followRedirects(HttpClient.Redirect.NORMAL)
         .connectTimeout(Duration.ofSeconds(30))
         .build()
@@ -81,6 +92,9 @@ class RequestExecutor(private val project: Project) {
          * 调用方仍能拿到部分数据排查问题。
          */
         const val MAX_RESPONSE_BYTES: Int = 50 * 1024 * 1024
+
+        /** HttpClient 异步线程池上限；IDE 内调试场景 32 足够。 */
+        private const val HTTP_CLIENT_PARALLELISM: Int = 32
 
         fun getInstance(project: Project): RequestExecutor =
             project.getService(RequestExecutor::class.java)

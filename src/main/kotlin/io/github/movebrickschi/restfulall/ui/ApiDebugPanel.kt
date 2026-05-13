@@ -770,7 +770,7 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                             if (result.shouldReconnect && reconnectCount < SSE_MAX_RECONNECTS && !sseCancelled) {
                                 reconnectCount++
                                 lastEventId = result.lastEventId
-                                val retryMs = result.retryMs
+                                val retryMs = result.retryMs.coerceIn(SSE_MIN_RETRY_MS, SSE_MAX_RETRY_MS)
                                 SwingUtilities.invokeLater {
                                     responseStatusLabel.text = MyMessageBundle.message(
                                         "debug.sse.reconnecting", reconnectCount, SSE_MAX_RECONNECTS
@@ -800,8 +800,21 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                         isNdjson -> handleNdjsonStream(response, historyEntry, startTime, state)
                         else -> {
                             val bodyStream = decompressIfNeeded(response.body(), response.headers())
-                            val bodyBytes = bodyStream.readBytes()
-                            val bodyString = String(bodyBytes, Charsets.UTF_8)
+                            val (bodyBytes, truncated) =
+                                io.github.movebrickschi.restfulall.service.IoSafetyUtil.readBoundedBytes(
+                                    bodyStream,
+                                    io.github.movebrickschi.restfulall.service.RequestExecutor.MAX_RESPONSE_BYTES,
+                                )
+                            val charset = io.github.movebrickschi.restfulall.service.parseResponseCharset(
+                                response.headers().firstValue("content-type").orElse(""),
+                            )
+                            val rawBody = String(bodyBytes, charset)
+                            val bodyString = if (truncated) {
+                                rawBody + "\n\n[Response truncated: exceeded " +
+                                    "${io.github.movebrickschi.restfulall.service.RequestExecutor.MAX_RESPONSE_BYTES / 1024 / 1024} MB cap]"
+                            } else {
+                                rawBody
+                            }
                             val elapsed = System.currentTimeMillis() - startTime
 
                             historyEntry.responseBody = bodyString
@@ -1065,6 +1078,16 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         val url = urlField.text.trim()
         if (!isWsUrl(url)) return
 
+        webSocket?.let { stale ->
+            try {
+                stale.sendClose(WebSocket.NORMAL_CLOSURE, "switching url")
+            } catch (_: Exception) {
+                // best-effort; if the stale ws is already closing this is fine
+            }
+            webSocket = null
+            isWsConnected = false
+        }
+
         sendButton.isEnabled = false
         sendButton.text = MyMessageBundle.message("debug.connecting.button")
         responseBodyArea.text = ""
@@ -1094,6 +1117,10 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                 data: CharSequence,
                 last: Boolean
             ): CompletionStage<*>? {
+                if (ws !== webSocket) {
+                    ws.request(1)
+                    return null
+                }
                 textBuffer.append(data)
                 if (last) {
                     val msg = textBuffer.toString()
@@ -1105,6 +1132,9 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
 
             override fun onClose(ws: WebSocket, statusCode: Int, reason: String): CompletionStage<*>? {
+                if (ws !== webSocket) {
+                    return CompletableFuture.completedFuture(null)
+                }
                 val r = reason.ifEmpty { "Normal" }
                 appendWsEvent(MyMessageBundle.message("debug.ws.event.disconnected"), "code=$statusCode reason=$r")
                 SwingUtilities.invokeLater {
@@ -1119,6 +1149,7 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
 
             override fun onError(ws: WebSocket, error: Throwable) {
+                if (ws !== webSocket) return
                 appendWsEvent(
                     MyMessageBundle.message("debug.ws.event.error"),
                     error.message ?: MyMessageBundle.message("debug.ws.unknown.error")
@@ -1332,6 +1363,9 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         private const val MAX_MULTIPART_FILE_BYTES: Long = 50L * 1024 * 1024
         private const val MAX_MULTIPART_TOTAL_BYTES: Long = 100L * 1024 * 1024
+
+        private const val SSE_MIN_RETRY_MS: Long = 1_000L
+        private const val SSE_MAX_RETRY_MS: Long = 60_000L
 
         private const val CARD_NONE = "none"
         private const val CARD_FORM_DATA = "form-data"

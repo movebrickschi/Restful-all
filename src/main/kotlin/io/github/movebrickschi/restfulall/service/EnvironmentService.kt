@@ -132,7 +132,7 @@ class EnvironmentService(private val project: Project) : PersistentStateComponen
      */
     fun resolve(template: String, envId: String? = null, strict: Boolean = false): String {
         if (!template.contains("\${")) return template
-        val env = if (envId != null) findById(envId) else getActive() ?: return template
+        val env = (if (envId != null) findById(envId) else getActive()) ?: return template
         val varMap = buildVarMap(env)
         return resolveInternal(template, varMap, strict, mutableSetOf(), 0)
     }

@@ -70,7 +70,7 @@ class BuiltinVariableResolverTest {
 
     @Test
     fun `mixed template with builtin and plain text`() {
-        val result = BuiltinVariableResolver.resolve("""{"id":"\${random.uuid}","ts":\${timestamp}}""")
+        val result = BuiltinVariableResolver.resolve("""{"id":"${'$'}{random.uuid}","ts":${'$'}{timestamp}}""")
         assertFalse(result.contains("\${random.uuid}"))
         assertFalse(result.contains("\${timestamp}"))
         assertTrue(result.contains("\"id\":\""))

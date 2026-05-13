@@ -313,21 +313,39 @@ class RouteListPanel(
             }
 
             override fun onSuccess() {
-                try {
-                    val endpoints = ApiDocumentExporter.fromRoutes(selectedRoutes, paramsMap)
-                    val content = ApiDocumentExporter.export(endpoints, format, options)
-                    target.writeText(content, Charsets.UTF_8)
-                    Messages.showInfoMessage(
-                        project,
-                        MyMessageBundle.message("route.list.export.success", target.absolutePath),
-                        MyMessageBundle.message("route.list.export.title"),
-                    )
+                val endpoints = try {
+                    ApiDocumentExporter.fromRoutes(selectedRoutes, paramsMap)
                 } catch (e: Exception) {
                     Messages.showErrorDialog(
                         project,
                         MyMessageBundle.message("route.list.export.failure", e.message ?: e.javaClass.simpleName),
                         MyMessageBundle.message("route.list.export.title"),
                     )
+                    return
+                }
+                ApplicationManager.getApplication().executeOnPooledThread {
+                    val result = runCatching {
+                        val content = ApiDocumentExporter.export(endpoints, format, options)
+                        target.writeText(content, Charsets.UTF_8)
+                    }
+                    ApplicationManager.getApplication().invokeLater {
+                        result.onSuccess {
+                            Messages.showInfoMessage(
+                                project,
+                                MyMessageBundle.message("route.list.export.success", target.absolutePath),
+                                MyMessageBundle.message("route.list.export.title"),
+                            )
+                        }.onFailure { e ->
+                            Messages.showErrorDialog(
+                                project,
+                                MyMessageBundle.message(
+                                    "route.list.export.failure",
+                                    e.message ?: e.javaClass.simpleName,
+                                ),
+                                MyMessageBundle.message("route.list.export.title"),
+                            )
+                        }
+                    }
                 }
             }
 

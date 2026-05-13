@@ -49,6 +49,19 @@ class RouteService(private val project: Project) : Disposable {
     private val initialScanDone = AtomicBoolean(false)
     private val scanning = AtomicBoolean(false)
 
+    /**
+     * \[v1.3.1] VFS 增量扫描专用有界 executor（最大并发 = [INCREMENTAL_SCAN_MAX_PARALLEL]）。
+     *
+     * 原实现直接走 `executeOnPooledThread`，多文件并发变更（如 git checkout 切分支）会
+     * 在通用 pooled thread 上启动 N 个 `ReadAction.compute`，与 IDE Indexing 抢占读锁
+     * 导致 UI 卡顿。这里改为受限 executor，让批量增量扫描在固定 worker 上排队执行。
+     */
+    private val incrementalScanExecutor =
+        AppExecutorUtil.createBoundedApplicationPoolExecutor(
+            "RestfulRouteIncrementalScan",
+            INCREMENTAL_SCAN_MAX_PARALLEL,
+        )
+
     init {
         project.messageBus.connect(this).subscribe(
             VirtualFileManager.VFS_CHANGES,
@@ -80,7 +93,7 @@ class RouteService(private val project: Project) : Disposable {
                         return
                     }
 
-                    ApplicationManager.getApplication().executeOnPooledThread {
+                    incrementalScanExecutor.execute {
                         val updates = HashMap<String, List<RouteInfo>>(filesToRescan.size)
                         for (file in filesToRescan) {
                             if (!file.isValid) continue
@@ -380,6 +393,9 @@ class RouteService(private val project: Project) : Disposable {
         private const val MIN_CHUNK_SIZE = 25
         private const val MAX_CHUNK_SIZE = 200
         private val PARALLELISM: Int = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(2)
+
+        /** VFS 增量扫描的最大并发；超过的任务在 BoundedApplicationPoolExecutor 内排队。 */
+        private const val INCREMENTAL_SCAN_MAX_PARALLEL: Int = 2
 
         private val SKIP_DIRECTORIES = setOf(
             "node_modules", "dist", "build", ".git", ".gradle",

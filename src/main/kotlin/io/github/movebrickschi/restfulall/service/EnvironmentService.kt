@@ -139,13 +139,20 @@ class EnvironmentService(private val project: Project) : PersistentStateComponen
 
     private fun buildVarMap(env: EnvironmentEntry): Map<String, String> {
         val map = mutableMapOf<String, String>()
+        val storage = SecretStorageService.getInstance(project)
         for (v in env.activeVariables()) {
             val value = if (v.secret) {
                 val ref = v.secretRefKey() ?: SecretStorageService.envKey(env.id, v.key)
                 try {
-                    SecretStorageService.getInstance(project).getSecret(ref) ?: ""
+                    val raw = storage.getSecret(ref)
+                    if (raw == null) {
+                        thisLogger().info("Secret variable not set: env=${env.id} key=${v.key}")
+                        ""
+                    } else {
+                        raw
+                    }
                 } catch (e: Exception) {
-                    thisLogger().warn("Failed to read secret for key=${v.key}", e)
+                    thisLogger().error("Failed to read secret for env=${env.id} key=${v.key}", e)
                     ""
                 }
             } else {

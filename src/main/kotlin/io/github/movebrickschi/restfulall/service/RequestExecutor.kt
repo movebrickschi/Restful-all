@@ -75,6 +75,13 @@ class RequestExecutor(private val project: Project) {
     companion object {
         private val METHODS_WITH_BODY = setOf("POST", "PUT", "PATCH", "DELETE")
 
+        /**
+         * 响应体硬上限，防止恶意 / 误配后端返回 GB 级响应导致 OOM。
+         * 超出后截断至上限并把 [RequestResult.error] 标记为 "response truncated"，
+         * 调用方仍能拿到部分数据排查问题。
+         */
+        const val MAX_RESPONSE_BYTES: Int = 50 * 1024 * 1024
+
         fun getInstance(project: Project): RequestExecutor =
             project.getService(RequestExecutor::class.java)
     }
@@ -183,7 +190,7 @@ class RequestExecutor(private val project: Project) {
             )
 
             val bodyStream = decompressIfNeeded(response.body(), response.headers())
-            val bodyBytes = bodyStream.readBytes()
+            val (bodyBytes, truncated) = IoSafetyUtil.readBoundedBytes(bodyStream, MAX_RESPONSE_BYTES)
             val bodyString = String(bodyBytes, Charsets.UTF_8)
             val elapsed = System.currentTimeMillis() - startTime
 
@@ -195,6 +202,11 @@ class RequestExecutor(private val project: Project) {
                 contentType = respContentType,
                 isSSE = isSSE,
                 isNdjson = isNdjson,
+                error = if (truncated) {
+                    "response truncated: exceeded ${MAX_RESPONSE_BYTES / 1024 / 1024} MB cap"
+                } else {
+                    null
+                },
             )
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()

@@ -258,14 +258,17 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun tryAutoDetect(entry: BaseUrlEntry) {
         val basePath = project.basePath ?: return
+        val baseDir = java.io.File(basePath)
         val modulePath = if (entry.moduleName == project.name) basePath
         else "$basePath/${entry.moduleName}"
 
         val resourcesDir = java.io.File(modulePath, "src/main/resources")
+        if (!io.github.movebrickschi.restfulall.service.IoSafetyUtil.isInsideDirectory(resourcesDir, baseDir)) return
         if (!resourcesDir.exists()) return
 
         val propsFile = java.io.File(resourcesDir, "application.properties")
-        if (propsFile.exists()) {
+        if (io.github.movebrickschi.restfulall.service.IoSafetyUtil.isInsideDirectory(propsFile, baseDir)
+            && propsFile.exists()) {
             val props = java.util.Properties()
             propsFile.inputStream().use { props.load(it) }
             props.getProperty("server.port")?.toIntOrNull()?.let { entry.port = it }
@@ -275,7 +278,8 @@ class BaseUrlPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
 
         val ymlFile = java.io.File(resourcesDir, "application.yml")
-        if (ymlFile.exists()) {
+        if (io.github.movebrickschi.restfulall.service.IoSafetyUtil.isInsideDirectory(ymlFile, baseDir)
+            && ymlFile.exists()) {
             parseSimpleYaml(ymlFile, entry)
             entry.type = BaseUrlEntry.TYPE_AUTO
         }

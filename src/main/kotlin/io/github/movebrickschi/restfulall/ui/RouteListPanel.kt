@@ -22,9 +22,11 @@ import io.github.movebrickschi.restfulall.model.RouteInfo
 import io.github.movebrickschi.restfulall.service.ExpressParamExtractor
 import io.github.movebrickschi.restfulall.service.LanguageChangeListener
 import io.github.movebrickschi.restfulall.service.NestJsParamExtractor
+import io.github.movebrickschi.restfulall.service.OpenApiParamExtractor
 import io.github.movebrickschi.restfulall.service.PythonParamExtractor
 import io.github.movebrickschi.restfulall.service.RouteService
 import io.github.movebrickschi.restfulall.service.SpringPsiParamExtractor
+import io.github.movebrickschi.restfulall.service.SwaggerImporter
 import java.awt.*
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
@@ -87,6 +89,7 @@ class RouteListPanel(
             border = JBUI.Borders.empty(2, 4)
 
             add(searchField, BorderLayout.CENTER)
+            add(buildImportOpenApiButton(), BorderLayout.EAST)
         }
         add(toolbar, BorderLayout.NORTH)
 
@@ -110,6 +113,70 @@ class RouteListPanel(
                 }
             }
         })
+    }
+
+    /**
+     * F4: 「导入 OpenAPI」工具栏按钮。
+     *
+     * - 点击弹 IntelliJ FileChooser，限 yaml / yml / json
+     * - 文件读取与 [SwaggerImporter.import] 在 IDE pool 上跑，主线程仅做一次 Messages 提示
+     * - 导入成功后立刻把虚拟 routes 推进 RouteService 并 [rebuildTree] 刷新 UI
+     */
+    private fun buildImportOpenApiButton(): JButton {
+        val button = JButton(AllIcons.ToolbarDecorator.Import).apply {
+            isBorderPainted = false
+            isContentAreaFilled = false
+            preferredSize = Dimension(28, 28)
+            toolTipText = MyMessageBundle.message("route.list.import.openapi.tooltip")
+        }
+        button.addActionListener { onImportOpenApiClicked() }
+        return button
+    }
+
+    private fun onImportOpenApiClicked() {
+        val descriptor = com.intellij.openapi.fileChooser.FileChooserDescriptor(true, false, false, false, false, false)
+            .withFileFilter { vf -> vf.extension?.lowercase() in OPENAPI_EXTENSIONS }
+            .withTitle(MyMessageBundle.message("route.list.import.openapi.dialog.title"))
+        val chosen = com.intellij.openapi.fileChooser.FileChooser.chooseFile(descriptor, project, null) ?: return
+        statusLabel.text = MyMessageBundle.message("route.list.import.openapi.in.progress", chosen.name)
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val specText = try {
+                String(chosen.contentsToByteArray(), Charsets.UTF_8)
+            } catch (e: Throwable) {
+                ApplicationManager.getApplication().invokeLater {
+                    statusLabel.text = MyMessageBundle.message(
+                        "route.list.import.openapi.read.failure",
+                        e.message ?: e.javaClass.simpleName,
+                    )
+                }
+                return@executeOnPooledThread
+            }
+            val result = SwaggerImporter.getInstance(project).import(specText, chosen.name)
+            ApplicationManager.getApplication().invokeLater {
+                applyImportResult(chosen.name, result)
+            }
+        }
+    }
+
+    private fun applyImportResult(sourceName: String, result: SwaggerImporter.ImportResult) {
+        if (!result.isSuccess) {
+            val joinedErrors = (result.errors + result.warnings).take(5).joinToString("\n").ifBlank { "unknown error" }
+            statusLabel.text = MyMessageBundle.message("route.list.import.openapi.failure", sourceName)
+            Messages.showWarningDialog(
+                project,
+                joinedErrors,
+                MyMessageBundle.message("route.list.import.openapi.failure.title"),
+            )
+            return
+        }
+        RouteService.getInstance(project).addImportedRoutes(result.routes, result.params)
+        val merged = RouteService.getInstance(project).getCachedRoutes()
+        updateRoutes(merged)
+        statusLabel.text = MyMessageBundle.message(
+            "route.list.import.openapi.success",
+            result.routes.size,
+            sourceName,
+        )
     }
 
     private fun setupTree() {
@@ -370,6 +437,7 @@ class RouteListPanel(
             Framework.NESTJS -> NestJsParamExtractor.extract(routeInfo)
             Framework.EXPRESS -> ExpressParamExtractor.extract(routeInfo)
             Framework.PYTHON -> PythonParamExtractor.extract(routeInfo)
+            Framework.OPENAPI -> OpenApiParamExtractor.extract(project, routeInfo)
         }
 
     private fun updateRoutes(newRoutes: List<RouteInfo>) {
@@ -848,6 +916,8 @@ class RouteListPanel(
         if (method.displayName.equals("DELETE", ignoreCase = true)) "DEL" else method.displayName
 
     companion object {
+        private val OPENAPI_EXTENSIONS = setOf("yaml", "yml", "json")
+
         private const val METHOD_TEXT_WIDTH = 40
         private const val METHOD_BADGE_WIDTH = 40
         private const val METHOD_BADGE_HEIGHT = 20

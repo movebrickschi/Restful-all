@@ -14,6 +14,7 @@ import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.*
 import com.intellij.util.concurrency.AppExecutorUtil
+import io.github.movebrickschi.restfulall.model.ExtractedMethodParams
 import io.github.movebrickschi.restfulall.model.RouteInfo
 import io.github.movebrickschi.restfulall.scanner.*
 import java.util.concurrent.CompletableFuture
@@ -46,6 +47,32 @@ class RouteService(private val project: Project) : Disposable {
      * 读操作单次 `get()` 拿到当时的不可变视图，无需加锁。
      */
     private val routesRef = AtomicReference<Map<String, List<RouteInfo>>>(emptyMap())
+
+    /**
+     * F4: OpenAPI 等外部 spec 导入而来的虚拟 routes。
+     * 与 [routesRef] 平行存放：
+     * - 来源是 [SwaggerImporter] 等内存 importer，没有真实磁盘文件
+     * - VFS 增量扫描永远不触碰这份引用
+     * - [getCachedRoutes] / [getAllRoutes] 把两份合并后排序
+     */
+    private val importedRoutesRef = AtomicReference<List<RouteInfo>>(emptyList())
+
+    /**
+     * F4: OpenAPI operation 的预解析参数表，按 [RouteInfo.stableId] 索引。
+     * [OpenApiParamExtractor] 反查；导入新一批时由 [addImportedRoutes] 整体替换。
+     */
+    private val importedParamsCache = ConcurrentHashMap<String, ExtractedMethodParams>()
+
+    /**
+     * [getCachedRoutes] 的结果缓存。以 [routesRef] 与 [importedRoutesRef] 当前快照作为缓存 key——
+     * 只要两份 ref 都未被替换（即 [applyIncrementalUpdate] / [scanProject] /
+     * [addImportedRoutes] / [clearImportedRoutes] 没动），后续调用可 O(1) 直接返回上次排序结果。
+     *
+     * popup 打开、状态栏刷新等场景调用 [getCachedRoutes] 频次高，这层缓存是热点优化。
+     */
+    private val sortedRoutesCache =
+        AtomicReference<Triple<Map<String, List<RouteInfo>>, List<RouteInfo>, List<RouteInfo>>?>(null)
+
     private val initialScanDone = AtomicBoolean(false)
     private val scanning = AtomicBoolean(false)
     private val disposed = AtomicBoolean(false)
@@ -152,7 +179,41 @@ class RouteService(private val project: Project) : Disposable {
         }
     }
 
-    fun getCachedRoutes(): List<RouteInfo> = computeSortedRoutes(routesRef.get())
+    fun getCachedRoutes(): List<RouteInfo> {
+        val snapshot = routesRef.get()
+        val imported = importedRoutesRef.get()
+        sortedRoutesCache.get()?.let { (cachedSnapshot, cachedImported, cachedResult) ->
+            if (cachedSnapshot === snapshot && cachedImported === imported) return cachedResult
+        }
+        val computed = computeSortedRoutes(snapshot, imported)
+        sortedRoutesCache.set(Triple(snapshot, imported, computed))
+        return computed
+    }
+
+    /**
+     * F4: \[OpenAPI 等] 导入而来的虚拟 routes 整体替换。
+     *
+     * 设计为「替换语义」而非「追加」：
+     * - 同一 yaml 反复导入不会产生重复条目
+     * - 用户切换不同 spec 时也只需要一次调用
+     *
+     * 调用方负责确保参数表 [paramsByStableId] 与 [routes] 中的
+     * [RouteInfo.stableId] 一一对应。
+     */
+    fun addImportedRoutes(routes: List<RouteInfo>, paramsByStableId: Map<String, ExtractedMethodParams>) {
+        importedRoutesRef.set(routes.toList())
+        importedParamsCache.clear()
+        importedParamsCache.putAll(paramsByStableId)
+        sortedRoutesCache.set(null)
+    }
+
+    fun clearImportedRoutes() {
+        importedRoutesRef.set(emptyList())
+        importedParamsCache.clear()
+        sortedRoutesCache.set(null)
+    }
+
+    fun getImportedParams(stableId: String): ExtractedMethodParams? = importedParamsCache[stableId]
 
     fun findRouteAt(file: VirtualFile, line: Int): RouteInfo? {
         val routes = routesRef.get()[file.path] ?: return null
@@ -165,6 +226,14 @@ class RouteService(private val project: Project) : Disposable {
         val routes = routesRef.get()[file.path] ?: return null
         return routes.firstOrNull { it.lineNumber == line }
     }
+
+    /**
+     * 轻量 fast-path：仅判断该文件是否扫描出过路由，不读 / 不排序。
+     * LineMarkerProvider 之类的高频钩子可用此 0 分配检查提前退出，
+     * 避免每个 leaf element 都触发 `getDocument` / `getLineNumber`。
+     */
+    fun hasRoutesIn(file: VirtualFile): Boolean =
+        routesRef.get()[file.path]?.isNotEmpty() == true
 
     fun updateFile(file: VirtualFile) {
         if (!shouldScan(file)) {
@@ -300,13 +369,16 @@ class RouteService(private val project: Project) : Disposable {
     }
 
     /**
-     * 从 file-path 索引表派生出排序后的路由列表。
+     * 从 file-path 索引表 + 导入虚拟列表派生出排序后的路由列表。
      * 每次调用都是纯计算，不依赖任何缓存字段；
      * routes 总量通常 < 1000，O(n log n) 排序在 ms 级。
      */
-    private fun computeSortedRoutes(source: Map<String, List<RouteInfo>>): List<RouteInfo> =
-        source.values.flatten()
-            .distinctBy { "${it.method}:${it.fullPath}:${it.file.path}:${it.lineNumber}" }
+    private fun computeSortedRoutes(
+        source: Map<String, List<RouteInfo>>,
+        imported: List<RouteInfo> = importedRoutesRef.get(),
+    ): List<RouteInfo> =
+        (source.values.flatten() + imported)
+            .distinctBy { it.dedupKey }
             .sortedWith(compareBy({ it.fullPath }, { it.method.name }))
 
     private fun collectFilesRecursively(dir: VirtualFile, result: MutableList<VirtualFile>) {

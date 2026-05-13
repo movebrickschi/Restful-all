@@ -1,0 +1,73 @@
+openapi: 3.0.3
+info:
+  title: Nested params F4 fixture
+  version: 1.0.0
+  description: Stress test for nested / oneOf / array schemas — importer must not crash.
+paths:
+  /orders/{orderId}/items:
+    post:
+      operationId: addOrderItem
+      summary: Add item to order
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: idempotency-key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    oneOf:
+                      - type: object
+                        required: [sku, qty]
+                        properties:
+                          sku: { type: string }
+                          qty: { type: integer, minimum: 1 }
+                          options:
+                            type: object
+                            additionalProperties: { type: string }
+                      - type: object
+                        required: [bundleId]
+                        properties:
+                          bundleId: { type: string }
+                          qty: { type: integer, default: 1 }
+                couponCode:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: ok
+        '409':
+          description: idempotency conflict
+  /orders/search:
+    get:
+      operationId: searchOrders
+      summary: Search orders
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [pending, paid, shipped, cancelled]
+        - name: createdAfter
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: ok

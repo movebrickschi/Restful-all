@@ -14,6 +14,13 @@ data class RouteInfo(
     val packageName: String = "",
     val routeGroupName: String = "",
     val routeName: String = "",
+    /**
+     * 路由方法上的文档注释纯文本（KDoc / Javadoc / JSDoc / Python docstring 抽取后清洗），
+     * 用于在调试面板展示。`null` 表示未抽取到，UI 应隐藏说明栏；空串视同 null。
+     * 与 [routeName]（来自 @Operation.summary 等注解的一句话标题）正交：
+     * routeName 优先做列表显示，description 用于详情展开。
+     */
+    val description: String? = null,
 ) {
     val displayPath: String = run {
         val normalized = fullPath.replace(SLASH_PATTERN, "/")
@@ -28,6 +35,15 @@ data class RouteInfo(
 
     val locationText: String
         get() = "$className#$functionName  (${file.name}:${lineNumber + 1})"
+
+    /**
+     * 排序 / 去重时的稳定 dedup key。每条 RouteInfo 只算一次，
+     * 避免在 `distinctBy { ... }` 比较器内反复拼字符串导致 GC 压力。
+     * 与 [searchKey] 不同：dedupKey 用于身份比较（不进入搜索匹配）。
+     */
+    val dedupKey: String by lazy {
+        "${method}:${displayPath}:${file.path}:$lineNumber"
+    }
 
     companion object {
         private val SLASH_PATTERN = Regex("/+")
@@ -55,4 +71,16 @@ enum class Framework(val displayName: String) {
     SPRING("Spring"),
     EXPRESS("Express"),
     PYTHON("Python"),
+
+    /**
+     * F4: OpenAPI 3.x 文件导入而来的虚拟 route。
+     *
+     * - 不来自任何源码扫描器；由 [io.github.movebrickschi.restfulall.service.SwaggerImporter] 产出
+     * - `RouteInfo.file` 为 `com.intellij.testFramework.LightVirtualFile`（IDE 内存中虚拟文件）
+     * - `RouteInfo.lineNumber` 仅作为同一虚拟文件内 operation 的去重序号，不对应真实行号
+     * - 参数提取走 [io.github.movebrickschi.restfulall.service.OpenApiParamExtractor]，
+     *   该 extractor 从 [io.github.movebrickschi.restfulall.service.RouteService] 缓存中按
+     *   `RouteInfo.stableId` 直接取已解析好的 `ExtractedMethodParams`
+     */
+    OPENAPI("OpenAPI"),
 }

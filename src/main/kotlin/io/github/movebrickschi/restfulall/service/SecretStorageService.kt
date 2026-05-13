@@ -71,7 +71,7 @@ class SecretStorageService(private val project: Project) {
             val scoped = scopedKey(namespaceKey)
             PasswordSafe.instance.set(createAttributes(scoped), Credentials(scoped, value))
         } catch (e: Exception) {
-            thisLogger().warn("SecretStorageService.setSecret failed for key=$namespaceKey", e)
+            thisLogger().warn("SecretStorageService.setSecret failed for keyHash=${logHash(namespaceKey)}", e)
         }
     }
 
@@ -97,18 +97,18 @@ class SecretStorageService(private val project: Project) {
                 try {
                     PasswordSafe.instance.set(scopedAttr, Credentials(scoped, legacyValue))
                     thisLogger().info(
-                        "SecretStorageService: copied legacy secret for namespaceKey=$namespaceKey to project-scoped key",
+                        "SecretStorageService: copied legacy secret for keyHash=${logHash(namespaceKey)} to project-scoped key",
                     )
                 } catch (migrateEx: Exception) {
                     thisLogger().warn(
-                        "SecretStorageService: legacy migrate failed for namespaceKey=$namespaceKey",
+                        "SecretStorageService: legacy migrate failed for keyHash=${logHash(namespaceKey)}",
                         migrateEx,
                     )
                 }
             }
             legacyValue
         } catch (e: Exception) {
-            thisLogger().warn("SecretStorageService.getSecret failed for key=$namespaceKey", e)
+            thisLogger().warn("SecretStorageService.getSecret failed for keyHash=${logHash(namespaceKey)}", e)
             null
         }
     }
@@ -123,13 +123,13 @@ class SecretStorageService(private val project: Project) {
         try {
             PasswordSafe.instance.set(createAttributes(scopedKey(namespaceKey)), null)
         } catch (e: Exception) {
-            thisLogger().warn("SecretStorageService.removeSecret failed for key=$namespaceKey", e)
+            thisLogger().warn("SecretStorageService.removeSecret failed for keyHash=${logHash(namespaceKey)}", e)
         }
         try {
             PasswordSafe.instance.set(createAttributes(namespaceKey), null)
         } catch (e: Exception) {
             thisLogger().warn(
-                "SecretStorageService.removeSecret legacy cleanup failed for key=$namespaceKey",
+                "SecretStorageService.removeSecret legacy cleanup failed for keyHash=${logHash(namespaceKey)}",
                 e,
             )
         }
@@ -158,4 +158,13 @@ class SecretStorageService(private val project: Project) {
 
     private fun createAttributes(serviceKey: String): CredentialAttributes =
         CredentialAttributes(generateServiceName(SUBSYSTEM, serviceKey))
+
+    /**
+     * 用于日志的稳定指纹：8 位 hex，避免把用户定义的 envId/varKey/provider 等
+     * 标识符整段写入 IDE log（同一 key 多次出错时仍可在日志里相互关联）。
+     */
+    private fun logHash(namespaceKey: String): String {
+        val h = namespaceKey.hashCode()
+        return Integer.toHexString(h).padStart(8, '0').takeLast(8)
+    }
 }

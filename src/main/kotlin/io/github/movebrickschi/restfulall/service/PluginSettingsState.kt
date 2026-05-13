@@ -80,11 +80,17 @@ class PluginSettingsState : PersistentStateComponent<PluginSettingsState.State> 
             myState.language = lang
             ApplicationLanguageHolder.set(lang)
         } catch (e: Exception) {
+            // 关键：fallback 到默认会让下次写入覆盖原文件，取证链路就断了。
+            // 这里写 ERROR 级日志并附排错指引（不主动 quarantine 文件，因为 IDEA 没有
+            // 公开 API 拿到 `restful-all.xml` 真实路径——但 ERROR 级会让用户和 issue
+            // 排错团队都能在 IDE log 中看到原始 stack trace，便于复制 xml 取证）。
             com.intellij.openapi.diagnostic.Logger
                 .getInstance(PluginSettingsState::class.java)
                 .error(
                     "Failed to load PluginSettingsState; falling back to defaults. " +
-                        "Corrupt restful-all.xml will be left in place but ignored this session.",
+                        "ACTION: before clicking any UI that triggers a save, please copy " +
+                        "<project>/.idea/restful-all.xml to attach when reporting; " +
+                        "the next state save will overwrite it.",
                     e,
                 )
             myState = State()
@@ -313,7 +319,8 @@ class PluginSettingsState : PersistentStateComponent<PluginSettingsState.State> 
     }
 
     companion object {
-        private const val MAX_HISTORY_SIZE = 500
+        /** v1.3.2 F9：历史上限从 500 提升到 1000 条（PRD 验收 §6.3 F9）。*/
+        private const val MAX_HISTORY_SIZE = 1000
         private const val MAX_RECENT_QUERIES = 10
 
         fun getInstance(project: Project): PluginSettingsState =

@@ -133,4 +133,73 @@ class SensitiveDataRedactorTest {
         val r = SensitiveDataRedactor.redactHeader(ParamEntry(true, "Authorization", ""))
         assertEquals("", r.value)
     }
+
+    @Test
+    fun `body redacts bearer_token pwd refresh_token private_key fields`() {
+        val body = """{"bearer_token":"abc","pwd":"123","refresh_token":"r1","private_key":"pem","keep":"yes"}"""
+        val redacted = SensitiveDataRedactor.redactBody(body)
+        assertTrue(redacted.contains("\"bearer_token\":\"${SensitiveDataRedactor.REDACTED}\""))
+        assertTrue(redacted.contains("\"pwd\":\"${SensitiveDataRedactor.REDACTED}\""))
+        assertTrue(redacted.contains("\"refresh_token\":\"${SensitiveDataRedactor.REDACTED}\""))
+        assertTrue(redacted.contains("\"private_key\":\"${SensitiveDataRedactor.REDACTED}\""))
+        assertTrue(redacted.contains("\"keep\":\"yes\""))
+        assertTrue(!redacted.contains("abc"))
+        assertTrue(!redacted.contains("123"))
+        assertTrue(!redacted.contains("\"r1\""))
+        assertTrue(!redacted.contains("\"pem\""))
+    }
+
+    @Test
+    fun `body redacts form-urlencoded password and api_key`() {
+        val body = "username=alice&password=p%40ss&api_key=AKIAxxx&count=3"
+        val redacted = SensitiveDataRedactor.redactBody(body)
+        assertTrue(redacted.contains("password=${SensitiveDataRedactor.REDACTED}"))
+        assertTrue(redacted.contains("api_key=${SensitiveDataRedactor.REDACTED}"))
+        assertTrue(redacted.contains("username=alice"))
+        assertTrue(redacted.contains("count=3"))
+        assertTrue(!redacted.contains("p%40ss"))
+        assertTrue(!redacted.contains("AKIAxxx"))
+    }
+
+    @Test
+    fun `redactPlainText handles error message with embedded url`() {
+        val raw = "Could not resolve host: api.example.com/v1/u?api_key=AKIAxxx&token=eyJ.J&page=2"
+        val redacted = SensitiveDataRedactor.redactPlainText(raw)
+        assertTrue(redacted.contains("api_key=${SensitiveDataRedactor.REDACTED}"))
+        assertTrue(redacted.contains("token=${SensitiveDataRedactor.REDACTED}"))
+        assertTrue(redacted.contains("page=2"))
+        assertTrue(!redacted.contains("AKIAxxx"))
+        assertTrue(!redacted.contains("eyJ.J"))
+    }
+
+    @Test
+    fun `redactPlainText preserves non-sensitive text`() {
+        val raw = "Connection refused: localhost:8080"
+        assertEquals(raw, SensitiveDataRedactor.redactPlainText(raw))
+    }
+
+    @Test
+    fun `redactPlainText handles blank input`() {
+        assertEquals("", SensitiveDataRedactor.redactPlainText(""))
+    }
+
+    @Test
+    fun `redact entry responseBody redacts embedded url tokens from error fallback`() {
+        val original = RequestHistoryEntry(
+            url = "https://api.example.com/u",
+            responseBody = "Request failed for https://api.example.com/u?api_key=AKIAxxx",
+        )
+        val redacted = SensitiveDataRedactor.redact(original)
+        assertTrue(redacted.responseBody.contains("api_key=${SensitiveDataRedactor.REDACTED}"))
+        assertTrue(!redacted.responseBody.contains("AKIAxxx"))
+        assertTrue(original.responseBody.contains("AKIAxxx"))
+    }
+
+    @Test
+    fun `header containing bearer or private_key in name is redacted`() {
+        listOf("X-Bearer", "X-Private-Key", "X-OTP", "X-PIN").forEach { name ->
+            val r = SensitiveDataRedactor.redactHeader(ParamEntry(true, name, "secretValue"))
+            assertEquals("name=$name should redact", SensitiveDataRedactor.REDACTED, r.value)
+        }
+    }
 }

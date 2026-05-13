@@ -22,6 +22,10 @@ import io.github.movebrickschi.restfulall.model.ParamEntry
 import io.github.movebrickschi.restfulall.model.RequestHistoryEntry
 import io.github.movebrickschi.restfulall.model.RouteInfo
 import io.github.movebrickschi.restfulall.model.AuthConfig
+import io.github.movebrickschi.restfulall.model.CollectionItem
+import io.github.movebrickschi.restfulall.service.AiException
+import io.github.movebrickschi.restfulall.service.AiService
+import io.github.movebrickschi.restfulall.service.AiUsageQuota
 import io.github.movebrickschi.restfulall.service.AssertionEngine
 import io.github.movebrickschi.restfulall.service.AuthService
 import io.github.movebrickschi.restfulall.service.CurlConverter
@@ -132,13 +136,56 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         }
     }
 
+    /** v1.3.1 P0-1 - AI 智能参数填充按钮（Pro 功能，Free 用户置灰）。*/
+    private val aiFillButton = JButton(AllIcons.Actions.Lightning).apply {
+        isBorderPainted = false
+        isContentAreaFilled = false
+        preferredSize = Dimension(28, 28)
+        toolTipText = "AI Fill"
+        addActionListener { onAiFillClicked() }
+    }
+
+    /** v1.3.1 P0-1 - AI 配置入口按钮（baseUrl / model / apiKey）。*/
+    private val aiConfigButton = JButton(AllIcons.General.Settings).apply {
+        isBorderPainted = false
+        isContentAreaFilled = false
+        preferredSize = Dimension(28, 28)
+        toolTipText = "AI Settings"
+        addActionListener { showAiConfigDialog() }
+    }
+
+    /** v1.3.2 P0-3 - AI 生成测试用例按钮（Pro）。*/
+    private val aiTestCaseButton = JButton(AllIcons.Actions.RunAll).apply {
+        isBorderPainted = false
+        isContentAreaFilled = false
+        preferredSize = Dimension(28, 28)
+        toolTipText = "AI Generate Test Cases"
+        addActionListener { onAiGenerateCasesClicked() }
+    }
+
+    /** v1.3.2 P0-2 - AI 接口诊断按钮（Pro）。挂在 response statusLabel 旁边。*/
+    private val aiDiagnoseButton = JButton(AllIcons.General.BalloonError).apply {
+        isBorderPainted = false
+        isContentAreaFilled = false
+        preferredSize = Dimension(28, 28)
+        toolTipText = "AI Diagnose"
+        addActionListener { onAiDiagnoseClicked() }
+    }
+
     /** F7: 断言编辑/结果面板；持有最近一次响应快照供「重跑」按钮使用。 */
     private val assertionPanel = AssertionTablePanel()
 
     /** F7: 最近一次响应快照（body / statusCode / elapsed / headers），用于重跑断言。 */
     private var lastResponseSnapshot: ResponseSnapshot? = null
 
-    private val responseBodyArea = JsonSyntaxTextPane(editable = false)
+    /** v1.3.2 F6: 响应高级查看面板（Pretty/Raw/Tree/Table/Image/Download）。*/
+    private val responseViewPanel = ResponseViewPanel(project)
+
+    /**
+     * 流式 / 历史回放复用旧 API：[responseBodyArea] 现在是 [responseViewPanel] 内部 prettyArea 的别名。
+     * SSE / NDJSON 增量 append 仍按行写入；非流式响应通过 [responseViewPanel.setResponse] 触发视图分发。
+     */
+    private val responseBodyArea: JsonSyntaxTextPane get() = responseViewPanel.rawTextPane()
     private val responseHeadersModel = ResponseTableModel()
     private val responseCookiesModel = ResponseTableModel()
     private val responseTabs = JBTabbedPane()
@@ -217,9 +264,35 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
             }
             curlImportButton.addActionListener { importFromCurl() }
             curlExportButton.addActionListener { exportAsCurl() }
+            val layoutButton = JButton(AllIcons.Actions.SplitVertically).apply {
+                isBorderPainted = false
+                isContentAreaFilled = false
+                preferredSize = Dimension(28, 28)
+                toolTipText = "Cycle layout (vertical / horizontal / request-only / response-only)"
+                addActionListener { cycleLayout() }
+            }
+            // v1.3.3 P2-8 - 接口压测按钮（Pro）
+            val loadTestButton = JButton(AllIcons.Nodes.Plugin).apply {
+                isBorderPainted = false
+                isContentAreaFilled = false
+                preferredSize = Dimension(28, 28)
+                toolTipText = "Load Test (Pro)"
+                addActionListener { openLoadTestDialog() }
+            }
+            // v1.3.3 P2-11 - 签名插件按钮（Pro）
+            val signatureButton = JButton(AllIcons.Actions.SetDefault).apply {
+                isBorderPainted = false
+                isContentAreaFilled = false
+                preferredSize = Dimension(28, 28)
+                toolTipText = "Apply AWS V4 / OAuth1 Signature (Pro)"
+                addActionListener { applySignaturePopup() }
+            }
             val rightBar = JPanel(FlowLayout(FlowLayout.RIGHT, 2, 0))
             rightBar.add(curlImportButton)
             rightBar.add(curlExportButton)
+            rightBar.add(layoutButton)
+            rightBar.add(signatureButton)
+            rightBar.add(loadTestButton)
             rightBar.add(sendButton)
             add(rightBar, BorderLayout.EAST)
         }
@@ -251,13 +324,11 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
             addTab("Cookies", cookiesPanel)
         }
 
+        // F6: 把原 raw text area 替换为支持 6 种视图的 ResponseViewPanel；
+        // responseFormatCombo (JSON/Text/HTML/XML) 仍在工具栏外层保留，但其语义已并入 viewMode 选择，
+        // 暂作为高级响应解析格式 hint 占位，后续 patch 释放或重组。
         val responseBodyPanel = JPanel(BorderLayout()).apply {
-            val toolbar = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
-                responseFormatCombo.preferredSize = Dimension(80, 24)
-                add(responseFormatCombo)
-            }
-            add(toolbar, BorderLayout.NORTH)
-            add(JBScrollPane(responseBodyArea), BorderLayout.CENTER)
+            add(responseViewPanel, BorderLayout.CENTER)
         }
 
         val responseHeadersTable = com.intellij.ui.table.JBTable(responseHeadersModel).apply {
@@ -280,16 +351,195 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
             val header = JPanel(BorderLayout()).apply {
                 responseStatusLabel.border = JBUI.Borders.empty(4, 0)
                 add(responseStatusLabel, BorderLayout.WEST)
+                val rightTools = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0))
+                rightTools.add(aiDiagnoseButton)
+                add(rightTools, BorderLayout.EAST)
             }
             add(header, BorderLayout.NORTH)
             add(responseTabs, BorderLayout.CENTER)
         }
 
-        val splitter = JBSplitter(true, 0.45f).apply {
+        // F13: 把 splitter 提到字段层，配合「Layout」按钮实时切换上下 / 左右 / 全屏请求 / 全屏响应。
+        mainSplitter = JBSplitter(true, 0.45f).apply {
             firstComponent = requestPanel
             secondComponent = responsePanel
         }
-        add(splitter, BorderLayout.CENTER)
+        cachedRequestPanel = requestPanel
+        cachedResponsePanel = responsePanel
+        add(mainSplitter, BorderLayout.CENTER)
+    }
+
+    /** v1.3.3 F13 - 主体上下 / 左右 / 全屏切换器。*/
+    private lateinit var mainSplitter: JBSplitter
+    private var cachedRequestPanel: JPanel? = null
+    private var cachedResponsePanel: JPanel? = null
+    private var currentLayout: LayoutMode = LayoutMode.VERTICAL
+
+    /** v1.3.3 F13 - 切换布局；按钮挂在 toolbar 上由 [setupTopBar] 注入。*/
+    private fun applyLayout(mode: LayoutMode) {
+        currentLayout = mode
+        val request = cachedRequestPanel ?: return
+        val response = cachedResponsePanel ?: return
+        when (mode) {
+            LayoutMode.VERTICAL -> {
+                mainSplitter.orientation = true
+                mainSplitter.proportion = 0.45f
+                mainSplitter.firstComponent = request
+                mainSplitter.secondComponent = response
+            }
+            LayoutMode.HORIZONTAL -> {
+                mainSplitter.orientation = false
+                mainSplitter.proportion = 0.50f
+                mainSplitter.firstComponent = request
+                mainSplitter.secondComponent = response
+            }
+            LayoutMode.REQUEST_ONLY -> {
+                mainSplitter.orientation = true
+                mainSplitter.proportion = 1.0f
+                mainSplitter.firstComponent = request
+                mainSplitter.secondComponent = null
+            }
+            LayoutMode.RESPONSE_ONLY -> {
+                mainSplitter.orientation = true
+                mainSplitter.proportion = 0.0f
+                mainSplitter.firstComponent = null
+                mainSplitter.secondComponent = response
+            }
+        }
+        mainSplitter.revalidate()
+        mainSplitter.repaint()
+    }
+
+    enum class LayoutMode { VERTICAL, HORIZONTAL, REQUEST_ONLY, RESPONSE_ONLY }
+
+    /** v1.3.3 F13 - 切到下一种布局（按 toolbar 按钮触发）。*/
+    fun cycleLayout() {
+        val all = LayoutMode.entries
+        val nextIdx = (all.indexOf(currentLayout) + 1) % all.size
+        applyLayout(all[nextIdx])
+    }
+
+    /**
+     * v1.3.3 P2-11 - 应用 AWS V4 / OAuth1 签名（Pro）。
+     *
+     * 用户在 Headers tab 中点击不会自动签名；此入口走 toolbar action（先 Pro gate）→
+     * 弹小对话框输入 accessKey/secret（PasswordSafe 不入库；本次输入仅内存） → 计算签名 →
+     * 直接 setParams 到 [headersPanel]。
+     */
+    private fun applySignaturePopup() {
+        val gateOk = io.github.movebrickschi.restfulall.service.ProFeatureGate.requirePro(
+            project,
+            io.github.movebrickschi.restfulall.service.ProFeature.SIGN_PLUGIN,
+        )
+        if (!gateOk) return
+        val choices = arrayOf("AWS Signature V4", "OAuth 1.0a")
+        val pick = javax.swing.JOptionPane.showOptionDialog(
+            this, "Choose signature type", "Apply Signature",
+            javax.swing.JOptionPane.DEFAULT_OPTION, javax.swing.JOptionPane.QUESTION_MESSAGE,
+            null, choices, choices[0],
+        )
+        if (pick < 0) return
+        if (pick == 0) applyAwsV4() else applyOAuth1()
+    }
+
+    private fun applyAwsV4() {
+        val ak = javax.swing.JOptionPane.showInputDialog(this, "AWS Access Key ID")?.trim().orEmpty()
+        if (ak.isEmpty()) return
+        val sk = promptPassword("AWS Secret Access Key") ?: return
+        val region = javax.swing.JOptionPane.showInputDialog(this, "AWS Region (e.g. us-east-1)", "us-east-1")?.trim().orEmpty()
+        if (region.isEmpty()) return
+        val service = javax.swing.JOptionPane.showInputDialog(this, "AWS Service (e.g. s3, execute-api)", "execute-api")?.trim().orEmpty()
+        if (service.isEmpty()) return
+
+        try {
+            val signed = io.github.movebrickschi.restfulall.service.SignaturePlugin.awsV4(
+                io.github.movebrickschi.restfulall.service.SignaturePlugin.AwsV4Input(
+                    accessKey = ak,
+                    secretKey = sk,
+                    region = region,
+                    service = service,
+                    method = methodCombo.selectedItem?.toString() ?: "GET",
+                    url = urlField.text.trim(),
+                    headers = headersPanel.getParams().toMap(),
+                    body = bodyTextArea.text.toByteArray(Charsets.UTF_8),
+                ),
+            )
+            val merged = headersPanel.getParams().toMutableList()
+            mergeOrReplace(merged, "Authorization", signed.authorization)
+            mergeOrReplace(merged, "x-amz-date", signed.amzDate)
+            mergeOrReplace(merged, "x-amz-content-sha256", signed.contentSha256)
+            headersPanel.setParams(merged)
+            javax.swing.JOptionPane.showMessageDialog(this, "AWS V4 signature applied to Headers tab.")
+        } catch (e: Exception) {
+            javax.swing.JOptionPane.showMessageDialog(this, e.message ?: "Sign failed", "AWS V4 failed",
+                javax.swing.JOptionPane.ERROR_MESSAGE)
+        }
+    }
+
+    private fun applyOAuth1() {
+        val ck = javax.swing.JOptionPane.showInputDialog(this, "OAuth Consumer Key")?.trim().orEmpty()
+        if (ck.isEmpty()) return
+        val cs = promptPassword("OAuth Consumer Secret") ?: return
+        val tk = javax.swing.JOptionPane.showInputDialog(this, "OAuth Token (optional)", "")?.trim().orEmpty()
+        val ts = promptPassword("OAuth Token Secret (optional, leave blank if none)") ?: ""
+        try {
+            val header = io.github.movebrickschi.restfulall.service.SignaturePlugin.oauth1(
+                io.github.movebrickschi.restfulall.service.SignaturePlugin.OAuth1Input(
+                    consumerKey = ck,
+                    consumerSecret = cs,
+                    token = tk,
+                    tokenSecret = ts,
+                    method = methodCombo.selectedItem?.toString() ?: "GET",
+                    url = urlField.text.trim(),
+                ),
+            )
+            val merged = headersPanel.getParams().toMutableList()
+            mergeOrReplace(merged, "Authorization", header)
+            headersPanel.setParams(merged)
+            javax.swing.JOptionPane.showMessageDialog(this, "OAuth 1.0a signature applied to Headers tab.")
+        } catch (e: Exception) {
+            javax.swing.JOptionPane.showMessageDialog(this, e.message ?: "Sign failed", "OAuth1 failed",
+                javax.swing.JOptionPane.ERROR_MESSAGE)
+        }
+    }
+
+    private fun promptPassword(label: String): String? {
+        val pw = javax.swing.JPasswordField()
+        val panel = javax.swing.JPanel(BorderLayout(4, 4))
+        panel.add(javax.swing.JLabel(label), BorderLayout.NORTH)
+        panel.add(pw, BorderLayout.CENTER)
+        val ok = javax.swing.JOptionPane.showConfirmDialog(
+            this, panel, label, javax.swing.JOptionPane.OK_CANCEL_OPTION,
+        )
+        if (ok != javax.swing.JOptionPane.OK_OPTION) return null
+        return String(pw.password)
+    }
+
+    private fun mergeOrReplace(list: MutableList<Pair<String, String>>, name: String, value: String) {
+        val idx = list.indexOfFirst { it.first.equals(name, ignoreCase = true) }
+        if (idx >= 0) list[idx] = name to value else list.add(name to value)
+    }
+
+    /** v1.3.3 P2-8 - 打开接口压测对话框（Pro）。 */
+    private fun openLoadTestDialog() {
+        val gateOk = io.github.movebrickschi.restfulall.service.ProFeatureGate.requirePro(
+            project,
+            io.github.movebrickschi.restfulall.service.ProFeature.PRESS_TEST,
+        )
+        if (!gateOk) return
+        if (urlField.text.isBlank()) {
+            javax.swing.JOptionPane.showMessageDialog(this, "Enter a URL first", "Load test",
+                javax.swing.JOptionPane.WARNING_MESSAGE)
+            return
+        }
+        val dialog = LoadTestDialog(
+            project = project,
+            initialUrl = urlField.text.trim(),
+            initialMethod = methodCombo.selectedItem?.toString() ?: "GET",
+            initialHeaders = headersPanel.getParams(),
+            initialBody = bodyTextArea.text,
+        )
+        dialog.show()
     }
 
     private fun applyI18n() {
@@ -357,6 +607,9 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         bodyCardPanel.add(urlEncodedPanel, CARD_URL_ENCODED)
         val textBodyToolbar = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
             add(jsonFormatButton)
+            add(aiFillButton)
+            add(aiTestCaseButton)
+            add(aiConfigButton)
         }
         val textBodyPanel = JPanel(BorderLayout()).apply {
             add(textBodyToolbar, BorderLayout.NORTH)
@@ -551,6 +804,371 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         requestTabs.selectedIndex = 0
 
         restoreResponseFromHistory(entry)
+    }
+
+    /**
+     * v1.3.1 F3 - 把 Collection 内保存的请求 spec 加载到调试面板。
+     *
+     * 与 [loadHistoryEntry] 的差异：
+     * - 来源是 [CollectionItem.spec]（XML 持久化的 RequestSpecData，含 enabled 标记）
+     * - 不带响应数据，因此清空响应区
+     * - 注释展示区清空（Collection 不携带源码注释）
+     */
+    fun loadCollectionItem(item: CollectionItem) {
+        val spec = item.spec
+        methodCombo.selectedItem = spec.method
+        urlField.text = spec.url
+        updateDescription(null)
+
+        pathParamPanel.clear()
+        for (p in spec.pathParams.filter { it.name.isNotBlank() }) {
+            pathParamPanel.addParam(p.name, p.value)
+        }
+        queryParamPanel.setParams(spec.queryParams.map { it.name to it.value })
+        headersPanel.setParams(spec.headers.map { it.name to it.value })
+        cookiesPanel.setParams(spec.cookies.map { it.name to it.value })
+
+        selectBodyType(spec.bodyType)
+        bodyTextArea.text = spec.bodyContent
+        if (spec.formParams.isNotEmpty()) {
+            val pairs = spec.formParams.map { it.name to it.value }
+            when (spec.bodyType) {
+                "form-data" -> formDataPanel.setParams(pairs)
+                "x-www-form-urlencoded" -> urlEncodedPanel.setParams(pairs)
+            }
+        }
+
+        responseBodyArea.text = ""
+        responseStatusLabel.text = ""
+
+        when {
+            spec.bodyType == "form-data" || spec.bodyType == "x-www-form-urlencoded" ->
+                requestTabs.selectedIndex = 1
+            spec.bodyContent.isNotBlank() -> requestTabs.selectedIndex = 1
+            spec.pathParams.any { it.name.isNotBlank() } -> requestTabs.selectedIndex = 2
+            else -> requestTabs.selectedIndex = 0
+        }
+    }
+
+    /**
+     * v1.3.1 P0-1 - 点击 AI Fill 按钮后的处理。
+     *
+     * 流程：
+     * 1. 走 [io.github.movebrickschi.restfulall.service.ProFeatureGate]：Pro 用户直接通过；
+     *    Free 用户检查 [AiUsageQuota]，超限弹升级气泡 + 走 require Pro。
+     * 2. [AiService.isConfigured] = false → 提示走 AI Settings 弹窗先配置
+     * 3. 在 pooled thread 上调 LLM；UI 上把按钮短暂置灰
+     * 4. 成功回写到 [bodyTextArea]；失败弹错误（区分 Quota / Network / Http / Malformed）
+     */
+    private fun onAiFillClicked() {
+        val ai = AiService.getInstance(project)
+        ai.ensureKeyLoaded()
+        if (!ai.getConfig().isConfigured) {
+            javax.swing.JOptionPane.showMessageDialog(
+                this,
+                "Please configure AI baseUrl / model / apiKey via the Settings gear first.",
+                "AI not configured",
+                javax.swing.JOptionPane.INFORMATION_MESSAGE,
+            )
+            showAiConfigDialog()
+            return
+        }
+
+        val isPro = io.github.movebrickschi.restfulall.service.ProFeatureGate.isPro(project)
+        if (!isPro) {
+            val remaining = AiUsageQuota.getInstance().remaining()
+            if (remaining <= 0) {
+                io.github.movebrickschi.restfulall.service.ProFeatureGate.requirePro(
+                    project,
+                    io.github.movebrickschi.restfulall.service.ProFeature.AI_PARAM_FILL,
+                )
+                return
+            }
+        }
+
+        val description = updateDescriptionText() ?: ""
+        val urlForHint = urlField.text
+        val schemaHint = buildSchemaHint()
+
+        aiFillButton.isEnabled = false
+        val original = aiFillButton.toolTipText
+        aiFillButton.toolTipText = "Calling LLM..."
+
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
+            val text = try {
+                ai.fillParameters(
+                    interfaceDescription = "$description\nURL hint: $urlForHint",
+                    schemaHint = schemaHint,
+                    existingValues = emptyMap(),
+                )
+            } catch (e: AiException.NotConfigured) {
+                javax.swing.SwingUtilities.invokeLater {
+                    javax.swing.JOptionPane.showMessageDialog(this, e.message, "AI not configured",
+                        javax.swing.JOptionPane.WARNING_MESSAGE)
+                }
+                null
+            } catch (e: AiException.QuotaExceeded) {
+                javax.swing.SwingUtilities.invokeLater {
+                    io.github.movebrickschi.restfulall.service.ProFeatureGate.requirePro(
+                        project,
+                        io.github.movebrickschi.restfulall.service.ProFeature.AI_PARAM_FILL,
+                    )
+                }
+                null
+            } catch (e: AiException) {
+                javax.swing.SwingUtilities.invokeLater {
+                    javax.swing.JOptionPane.showMessageDialog(this, e.message, "AI call failed",
+                        javax.swing.JOptionPane.ERROR_MESSAGE)
+                }
+                null
+            } catch (e: Exception) {
+                javax.swing.SwingUtilities.invokeLater {
+                    javax.swing.JOptionPane.showMessageDialog(this, e.message ?: "I/O error", "AI call failed",
+                        javax.swing.JOptionPane.ERROR_MESSAGE)
+                }
+                null
+            }
+
+            javax.swing.SwingUtilities.invokeLater {
+                aiFillButton.isEnabled = true
+                aiFillButton.toolTipText = original
+                if (text != null) {
+                    selectBodyType("json")
+                    bodyTextArea.text = text
+                    bodyTextArea.caretPosition = 0
+                }
+            }
+        }
+    }
+
+    /**
+     * v1.3.2 P0-2 - AI 接口诊断。需要 [lastResponseSnapshot] 已被填充；否则提示先发请求。
+     *
+     * 弹一个非模态 dialog 展示分析结果（用户可继续在调试面板操作）。
+     */
+    private fun onAiDiagnoseClicked() {
+        val snapshot = lastResponseSnapshot
+        if (snapshot == null) {
+            javax.swing.JOptionPane.showMessageDialog(
+                this,
+                "Send a request first; diagnostics needs the last response.",
+                "Nothing to diagnose",
+                javax.swing.JOptionPane.INFORMATION_MESSAGE,
+            )
+            return
+        }
+        if (!ensureAiReadyOrUpsell(io.github.movebrickschi.restfulall.service.ProFeature.AI_DIAGNOSE)) return
+
+        val requestSummary = buildString {
+            appendLine(methodCombo.selectedItem.toString() + " " + urlField.text)
+            val headers = headersPanel.getParams()
+            if (headers.isNotEmpty()) {
+                appendLine("Headers:")
+                headers.forEach { (k, v) -> appendLine("  $k: $v") }
+            }
+            val body = bodyTextArea.text
+            if (body.isNotBlank()) appendLine("Body:\n$body")
+        }
+        runAiAsync("Diagnosing...") {
+            io.github.movebrickschi.restfulall.service.AiService.getInstance(project).diagnose(
+                requestSummary,
+                snapshot.statusCode,
+                snapshot.body,
+            )
+        }
+    }
+
+    /**
+     * v1.3.2 P0-3 - AI 生成测试用例。
+     *
+     * 取当前 method+url+body 作为正向样例，加 description 作为说明，让 LLM 产 5~10 用例 JSON 数组。
+     * 输出弹窗展示，便于用户复制 / 后续接入 P2-9 用例编排。
+     */
+    private fun onAiGenerateCasesClicked() {
+        if (!ensureAiReadyOrUpsell(io.github.movebrickschi.restfulall.service.ProFeature.AI_TEST_CASE)) return
+        val sample = buildString {
+            appendLine(methodCombo.selectedItem.toString() + " " + urlField.text)
+            val body = bodyTextArea.text
+            if (body.isNotBlank()) appendLine("Body:\n$body")
+        }
+        val description = updateDescriptionText().orEmpty()
+        runAiAsync("Generating test cases...") {
+            io.github.movebrickschi.restfulall.service.AiService.getInstance(project)
+                .generateTestCases(description, sample)
+        }
+    }
+
+    /**
+     * 通用 AI 异步执行 + 结果弹窗。
+     * - Pro/quota 校验已在 [ensureAiReadyOrUpsell] 完成
+     * - 失败弹错误，成功弹一个可滚动只读 dialog 展示 markdown / JSON
+     */
+    private fun runAiAsync(progressTooltip: String, call: () -> String) {
+        val backup = aiDiagnoseButton.toolTipText
+        aiDiagnoseButton.toolTipText = progressTooltip
+        aiDiagnoseButton.isEnabled = false
+        aiTestCaseButton.isEnabled = false
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
+            val (ok, text) = try {
+                true to call()
+            } catch (e: io.github.movebrickschi.restfulall.service.AiException.QuotaExceeded) {
+                javax.swing.SwingUtilities.invokeLater {
+                    io.github.movebrickschi.restfulall.service.ProFeatureGate.requirePro(
+                        project,
+                        io.github.movebrickschi.restfulall.service.ProFeature.AI_DIAGNOSE,
+                    )
+                }
+                false to (e.message ?: "Quota exceeded")
+            } catch (e: io.github.movebrickschi.restfulall.service.AiException) {
+                false to (e.message ?: "AI failure")
+            } catch (e: Exception) {
+                false to (e.message ?: "Unknown failure")
+            }
+            javax.swing.SwingUtilities.invokeLater {
+                aiDiagnoseButton.toolTipText = backup
+                aiDiagnoseButton.isEnabled = true
+                aiTestCaseButton.isEnabled = true
+                if (!ok) {
+                    javax.swing.JOptionPane.showMessageDialog(this, text, "AI failed",
+                        javax.swing.JOptionPane.ERROR_MESSAGE)
+                    return@invokeLater
+                }
+                showAiResultDialog(text)
+            }
+        }
+    }
+
+    private fun showAiResultDialog(text: String) {
+        val area = javax.swing.JTextArea(text).apply {
+            isEditable = false
+            lineWrap = true
+            wrapStyleWord = true
+            border = JBUI.Borders.empty(8)
+        }
+        val scroll = JBScrollPane(area).apply {
+            preferredSize = Dimension(640, 400)
+        }
+        javax.swing.JOptionPane.showMessageDialog(
+            this, scroll, "AI result", javax.swing.JOptionPane.INFORMATION_MESSAGE,
+        )
+    }
+
+    /**
+     * 共用前置校验：AI 是否已配置 + Pro/Quota gate。
+     * @return true 表示通过可继续；false 表示已弹相应窗口，调用方应 early-return。
+     */
+    private fun ensureAiReadyOrUpsell(feature: io.github.movebrickschi.restfulall.service.ProFeature): Boolean {
+        val ai = AiService.getInstance(project)
+        ai.ensureKeyLoaded()
+        if (!ai.getConfig().isConfigured) {
+            javax.swing.JOptionPane.showMessageDialog(
+                this,
+                "Please configure AI baseUrl / model / apiKey via the AI Settings gear first.",
+                "AI not configured",
+                javax.swing.JOptionPane.INFORMATION_MESSAGE,
+            )
+            showAiConfigDialog()
+            return false
+        }
+        val isPro = io.github.movebrickschi.restfulall.service.ProFeatureGate.isPro(project)
+        if (!isPro && AiUsageQuota.getInstance().remaining() <= 0) {
+            io.github.movebrickschi.restfulall.service.ProFeatureGate.requirePro(project, feature)
+            return false
+        }
+        return true
+    }
+
+    /**
+     * v1.3.1 P0-1 - AI 配置弹窗（baseUrl / model / apiKey）。
+     *
+     * 3 次 showInputDialog 拼成一个对话流；apiKey 走 PasswordSafe，不落盘。
+     * 后续可重构为正式 Settings 页面，但本版选择最快上线。
+     */
+    private fun showAiConfigDialog() {
+        val ai = AiService.getInstance(project)
+        val current = ai.getConfig()
+        ai.ensureKeyLoaded()
+
+        val newBase = javax.swing.JOptionPane.showInputDialog(
+            this, "AI base URL (OpenAI-compatible)", current.baseUrl,
+        )?.trim() ?: return
+        val newModel = javax.swing.JOptionPane.showInputDialog(
+            this, "AI model id", current.model,
+        )?.trim() ?: return
+
+        val keyPanel = javax.swing.JPanel(java.awt.BorderLayout())
+        val keyField = javax.swing.JPasswordField()
+        if (current.apiKeyInMemory.isNotBlank()) keyField.text = current.apiKeyInMemory
+        keyPanel.add(javax.swing.JLabel("Bearer API key (stored in PasswordSafe)"), java.awt.BorderLayout.NORTH)
+        keyPanel.add(keyField, java.awt.BorderLayout.CENTER)
+        val choice = javax.swing.JOptionPane.showConfirmDialog(
+            this, keyPanel, "AI API Key", javax.swing.JOptionPane.OK_CANCEL_OPTION,
+        )
+        if (choice != javax.swing.JOptionPane.OK_OPTION) return
+        val newKey = String(keyField.password)
+
+        ai.updateConfig(current.copy(baseUrl = newBase, model = newModel))
+        ai.updateApiKey(newKey)
+
+        javax.swing.JOptionPane.showMessageDialog(this, "AI settings saved.")
+    }
+
+    /** 抽取当前 Description 文本（F10 注释展示区），AI prompt 使用。*/
+    private fun updateDescriptionText(): String? =
+        descriptionArea.text?.trim()?.takeIf { it.isNotEmpty() }
+
+    /**
+     * 从当前 UI 已有字段拼一个最小 schema hint：
+     * - body 文本（原样）
+     * - query keys
+     * - path keys
+     * 用 newline 串起来交给 LLM
+     */
+    private fun buildSchemaHint(): String = buildString {
+        val q = queryParamPanel.getParams()
+        if (q.isNotEmpty()) {
+            appendLine("Query params: " + q.joinToString(", ") { it.first })
+        }
+        val p = pathParamPanel.getParams()
+        if (p.isNotEmpty()) {
+            appendLine("Path params: " + p.joinToString(", ") { it.first })
+        }
+        val existing = bodyTextArea.text.trim()
+        if (existing.isNotEmpty()) {
+            appendLine("Current body (partial):")
+            appendLine(existing.take(1500))
+        }
+    }
+
+    /**
+     * v1.3.1 F3 - 获取调试面板当前请求的快照，用于 "加入 Collection"。
+     *
+     * 仅拷贝 UI 当前可见的状态，不应用 path-template 替换；与发送时 [sendRequest]
+     * 走的 mergeParams 流程区分（不在保存时把全局参数硬合并进去，避免污染 collection）。
+     */
+    fun snapshotCurrentSpec(): io.github.movebrickschi.restfulall.model.RequestSpecData {
+        val method = methodCombo.selectedItem as? String ?: "GET"
+        val url = urlField.text.trim()
+        val bodyType = getSelectedBodyType()
+        val body = when (bodyType) {
+            "json", "xml", "raw" -> bodyTextArea.text
+            else -> ""
+        }
+        return io.github.movebrickschi.restfulall.model.RequestSpecData(
+            method = method,
+            url = url,
+            queryParams = queryParamPanel.getParams()
+                .map { ParamEntry(true, it.first, it.second) }.toMutableList(),
+            headers = headersPanel.getParams()
+                .map { ParamEntry(true, it.first, it.second) }.toMutableList(),
+            cookies = cookiesPanel.getParams()
+                .map { ParamEntry(true, it.first, it.second) }.toMutableList(),
+            pathParams = pathParamPanel.getParams()
+                .map { ParamEntry(true, it.first, it.second) }.toMutableList(),
+            bodyType = bodyType,
+            bodyContent = body,
+            formParams = getFormParamEntries(),
+        )
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -1188,8 +1806,9 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         responseStatusLabel.text = MyMessageBundle.message("debug.status.done", statusCode, elapsed, sizeText)
         responseStatusLabel.foreground = statusColor
 
-        responseBodyArea.text = tryFormatJson(body)
-        responseBodyArea.caretPosition = 0
+        // F6: 把响应交给 ResponseViewPanel，按 content-type 自动选 Pretty / Tree / Image / Download 等。
+        val contentType = headers.firstValue("content-type").orElse("")
+        responseViewPanel.setResponse(body = body, contentType = contentType, bytes = null)
 
         responseHeadersModel.setData(headers.map().entries.map { it.key to it.value.joinToString(", ") })
 
@@ -1252,8 +1871,10 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()), Disp
             responseStatusLabel.foreground = ERROR_COLOR
         }
 
-        responseBodyArea.text = tryFormatJson(body)
-        responseBodyArea.caretPosition = 0
+        // F6: 历史回放也走 ResponseViewPanel；content-type 走 header 字段，缺失则默认 json
+        val ct = entry.responseHeaders.firstOrNull { it.name.equals("content-type", ignoreCase = true) }
+            ?.value.orEmpty().ifBlank { "application/json" }
+        responseViewPanel.setResponse(body = body, contentType = ct, bytes = null)
 
         responseHeadersModel.setData(entry.responseHeaders.map { it.name to it.value })
 

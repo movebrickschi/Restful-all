@@ -25,6 +25,8 @@ class MyToolWindowFactory : ToolWindowFactory {
 
         val routesWrapper = WrapperPanel(mainPanel)
         val historyWrapper = WrapperPanel(mainPanel)
+        val collectionsWrapper = WrapperPanel(mainPanel)
+        val environmentWrapper = WrapperPanel(mainPanel)
 
         val interfaceContent = contentFactory.createContent(routesWrapper, MyMessageBundle.message("tab.interface"), false).apply {
             isCloseable = false
@@ -33,6 +35,16 @@ class MyToolWindowFactory : ToolWindowFactory {
         val historyContent = contentFactory.createContent(historyWrapper, MyMessageBundle.message("tab.request.history"), false).apply {
             isCloseable = false
         }
+        val collectionsContent = contentFactory.createContent(
+            collectionsWrapper,
+            MyMessageBundle.message("tab.collections"),
+            false,
+        ).apply { isCloseable = false }
+        val environmentContent = contentFactory.createContent(
+            environmentWrapper,
+            MyMessageBundle.message("tab.environment"),
+            false,
+        ).apply { isCloseable = false }
         val baseUrlPanel = BaseUrlPanel(project)
         val globalParamsPanel = GlobalParamsPanel(project)
         val baseUrlContent = contentFactory.createContent(baseUrlPanel, MyMessageBundle.message("tab.base.url"), false).apply {
@@ -50,6 +62,8 @@ class MyToolWindowFactory : ToolWindowFactory {
 
         toolWindow.contentManager.addContent(interfaceContent)
         toolWindow.contentManager.addContent(historyContent)
+        toolWindow.contentManager.addContent(collectionsContent)
+        toolWindow.contentManager.addContent(environmentContent)
         toolWindow.contentManager.addContent(baseUrlContent)
         toolWindow.contentManager.addContent(globalParamsContent)
 
@@ -69,6 +83,14 @@ class MyToolWindowFactory : ToolWindowFactory {
                         historyWrapper.attach(mainPanel)
                         mainPanel.showHistory()
                     }
+                    collectionsContent -> {
+                        collectionsWrapper.attach(mainPanel)
+                        mainPanel.showCollections()
+                    }
+                    environmentContent -> {
+                        environmentWrapper.attach(mainPanel)
+                        mainPanel.showEnvironment()
+                    }
                 }
             }
         })
@@ -79,6 +101,8 @@ class MyToolWindowFactory : ToolWindowFactory {
         val tabBindings = listOf(
             interfaceContent to "tab.interface",
             historyContent to "tab.request.history",
+            collectionsContent to "tab.collections",
+            environmentContent to "tab.environment",
             baseUrlContent to "tab.base.url",
             globalParamsContent to "tab.global.params",
         )

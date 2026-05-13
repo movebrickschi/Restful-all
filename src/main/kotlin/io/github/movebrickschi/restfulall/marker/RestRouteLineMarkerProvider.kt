@@ -42,6 +42,9 @@ class RestRouteLineMarkerProvider : LineMarkerProviderDescriptor() {
 
         val service = RouteService.getInstance(project)
         if (!service.isInitialScanDone) return null
+        // Fast-path：本文件没有任何已扫描出的路由，立即放弃；避免对 lib 源码 / 普通 Java
+        // 文件每个 leaf 都跑 getDocument + getLineNumber。
+        if (!service.hasRoutesIn(virtualFile)) return null
 
         val document = PsiDocumentManager.getInstance(project).getDocument(containingFile) ?: return null
         val startOffset = element.textRange.startOffset

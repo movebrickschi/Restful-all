@@ -18,12 +18,21 @@ object RouteSortStrategy {
     fun smartSort(routes: List<RouteInfo>, settings: PluginSettingsState): List<RouteInfo> {
         if (routes.isEmpty()) return routes
         val now = System.currentTimeMillis()
-        return routes.sortedWith(
-            compareByDescending<RouteInfo> { scoreOf(it, settings, now) }
-                .thenBy { it.displayPath }
-                .thenBy { it.method.name },
-        )
+        // 预计算分数避免比较器内 O(n log n) 次重复 score 计算（每次都 keyOf + getMeta）
+        val scored = Array(routes.size) { idx ->
+            val r = routes[idx]
+            ScoredRoute(r, scoreOf(r, settings, now))
+        }
+        scored.sortWith(SCORED_COMPARATOR)
+        return scored.map { it.route }
     }
+
+    private data class ScoredRoute(val route: RouteInfo, val score: Double)
+
+    private val SCORED_COMPARATOR: Comparator<ScoredRoute> =
+        compareByDescending<ScoredRoute> { it.score }
+            .thenBy { it.route.displayPath }
+            .thenBy { it.route.method.name }
 
     fun scoreOf(route: RouteInfo, settings: PluginSettingsState, now: Long = System.currentTimeMillis()): Double {
         val meta = settings.getMeta(UserRouteMeta.keyOf(route)) ?: return 0.0

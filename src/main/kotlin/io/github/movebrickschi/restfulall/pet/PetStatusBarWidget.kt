@@ -6,7 +6,6 @@ import com.intellij.openapi.wm.CustomStatusBarWidget
 import com.intellij.openapi.wm.StatusBar
 import com.intellij.openapi.wm.StatusBarWidget
 import com.intellij.openapi.wm.StatusBarWidgetFactory
-import com.intellij.util.messages.MessageBusConnection
 import io.github.movebrickschi.restfulall.MyMessageBundle
 import io.github.movebrickschi.restfulall.humanize.FunMessageProvider
 import io.github.movebrickschi.restfulall.service.PluginSettingsState
@@ -36,22 +35,21 @@ import javax.swing.Timer
 class PetStatusBarWidget(private val project: Project) : CustomStatusBarWidget {
 
     private val component: PetComponent = PetComponent(project)
-    private var connection: MessageBusConnection? = null
 
     override fun ID(): String = WIDGET_ID
     override fun getComponent(): JComponent = component
 
     override fun install(statusBar: StatusBar) {
         component.start()
-        connection = project.messageBus.connect()
-        connection?.subscribe(RouteNavigationListener.TOPIC, RouteNavigationListener { _ ->
-            component.onNavigate()
-        })
+        // 绑定到自身 Disposable，由 Disposer 统一回收，无需手动 disconnect；
+        // 避免 dispose 抛异常 / 漏调时连接泄漏。
+        project.messageBus.connect(this).subscribe(
+            RouteNavigationListener.TOPIC,
+            RouteNavigationListener { _ -> component.onNavigate() },
+        )
     }
 
     override fun dispose() {
-        connection?.disconnect()
-        connection = null
         component.stop()
     }
 
@@ -67,6 +65,9 @@ private class PetComponent(private val project: Project) : JComponent() {
     private var moodHoldUntil: Long = 0L
     private var lastFrameAdvanceAt: Long = 0L
     private val random = java.util.Random()
+    // 缓存 RouteStatsService 引用，避免 30fps × `defaultMood()` 每帧都跑 service lookup
+    // （Component cache 早于 service container，service 一定迟于 widget 初始化完成）
+    private val statsService: RouteStatsService by lazy { RouteStatsService.getInstance(project) }
 
     /** 主时钟：每 ~33ms 唤起一次（≈30fps），具体推帧速度由 mood.fps 决定。 */
     private val timer = Timer(33) {
@@ -151,7 +152,7 @@ private class PetComponent(private val project: Project) : JComponent() {
 
     private fun defaultMood(): PetMood {
         return try {
-            if (RouteStatsService.getInstance(project).getTodayNavigationCount() > 50) PetMood.TIRED
+            if (statsService.getTodayNavigationCount() > 50) PetMood.TIRED
             else PetMood.IDLE
         } catch (_: Throwable) {
             PetMood.IDLE

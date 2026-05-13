@@ -35,15 +35,29 @@ object SensitiveDataRedactor {
         Regex("(?i)^proxy-authorization$"),
         Regex("(?i)^cookie$"),
         Regex("(?i)^set-cookie$"),
-        Regex("(?i).*(token|secret|api[-_]?key|password|passwd|session|x-auth).*"),
+        // 补：CSRF / XSRF 系列也需脱敏
+        Regex("(?i).*(token|secret|api[-_]?key|password|passwd|pwd|session|x-auth|bearer|private[-_]?key|otp|pin|csrf|xsrf).*"),
     )
 
     private val SENSITIVE_PARAM_PATTERNS: List<Regex> = listOf(
-        Regex("(?i).*(token|secret|api[-_]?key|password|passwd|access[-_]?key|sign(ature)?).*"),
+        Regex(
+            "(?i).*(token|secret|api[-_]?key|password|passwd|pwd|access[-_]?key|sign(ature)?|" +
+                "bearer|private[-_]?key|client[-_]?secret|otp|pin|csrf|xsrf).*",
+        ),
     )
 
     private val BODY_JSON_REDACT_PATTERN: Regex = Regex(
-        "\"(token|access_token|refresh_token|id_token|password|passwd|api_key|apiKey|secret|client_secret|signature)\"\\s*:\\s*\"([^\"\\\\]|\\\\.)*\"",
+        "\"(token|access_token|refresh_token|id_token|bearer_token|bearerToken|password|passwd|pwd|" +
+            "api_key|apiKey|secret|client_secret|clientSecret|private_key|privateKey|signature|otp|pin|" +
+            "csrf_token|csrfToken|xsrf_token|xsrfToken)\"" +
+            "\\s*:\\s*\"([^\"\\\\]|\\\\.)*\"",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private val FORM_URLENCODED_REDACT_PATTERN: Regex = Regex(
+        "(^|[&?])(token|access_token|refresh_token|id_token|bearer_token|password|passwd|pwd|" +
+            "api_key|apikey|secret|client_secret|private_key|signature|otp|pin|" +
+            "csrf_token|csrftoken|xsrf_token|xsrftoken)=([^&#\\s]*)",
         RegexOption.IGNORE_CASE,
     )
 
@@ -54,7 +68,7 @@ object SensitiveDataRedactor {
         cookies = entry.cookies.map { ParamEntry(it.enabled, it.name, redactedIfNotBlank(it.value)) }.toMutableList(),
         body = redactBody(entry.body),
         formParams = entry.formParams.map(::redactParam).toMutableList(),
-        responseBody = redactBody(entry.responseBody),
+        responseBody = redactPlainText(entry.responseBody),
         responseHeaders = entry.responseHeaders.map(::redactHeader).toMutableList(),
     )
 
@@ -96,11 +110,39 @@ object SensitiveDataRedactor {
 
     fun redactBody(body: String): String {
         if (body.isBlank()) return body
-        return BODY_JSON_REDACT_PATTERN.replace(body) { match ->
+        val afterJson = BODY_JSON_REDACT_PATTERN.replace(body) { match ->
+            val name = match.groupValues[1]
+            "\"$name\":\"$REDACTED\""
+        }
+        return redactFormUrlEncoded(afterJson)
+    }
+
+    /**
+     * 脱敏纯文本（用于错误消息、异常 stack、自由格式日志等）。
+     *
+     * 同时处理 URL query / form-urlencoded / JSON 三种内嵌片段，覆盖
+     * `RequestExecutor` 与 `ApiDebugPanel` catch 路径里把 `e.message` 直接拼回
+     * `responseBody` / `error` 字段的场景：消息形如
+     * `Could not resolve host: api.example.com/?api_key=xxx&token=yyy` 时，
+     * 通过本方法可一并把内嵌的密文换成占位符。
+     */
+    fun redactPlainText(text: String): String {
+        if (text.isBlank()) return text
+        val afterUrl = redactUrlQuery(text)
+        val afterForm = redactFormUrlEncoded(afterUrl)
+        return BODY_JSON_REDACT_PATTERN.replace(afterForm) { match ->
             val name = match.groupValues[1]
             "\"$name\":\"$REDACTED\""
         }
     }
+
+    private fun redactFormUrlEncoded(text: String): String =
+        FORM_URLENCODED_REDACT_PATTERN.replace(text) { match ->
+            val prefix = match.groupValues[1]
+            val name = match.groupValues[2]
+            val value = match.groupValues[3]
+            if (value.isBlank()) match.value else "$prefix$name=$REDACTED"
+        }
 
     private fun redactedIfNotBlank(value: String): String =
         if (value.isBlank()) value else REDACTED

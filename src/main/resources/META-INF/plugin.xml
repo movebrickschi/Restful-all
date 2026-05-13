@@ -84,6 +84,14 @@
         <notificationGroup id="Restful-all.Pro" displayType="BALLOON" bundle="messages.MyMessageBundle"
                            key="notification.group.pro"/>
 
+        <!-- 错误通知组：sticky balloon，保证用户不会错过失败信息 -->
+        <notificationGroup id="Restful-all.Errors" displayType="STICKY_BALLOON" bundle="messages.MyMessageBundle"
+                           key="notification.group.errors"/>
+
+        <!-- 普通信息通知组：仅写入事件日志（NONE），不打扰主流程 -->
+        <notificationGroup id="Restful-all.Info" displayType="NONE" bundle="messages.MyMessageBundle"
+                           key="notification.group.info"/>
+
         <!-- v1.1 像素小猫宠物 -->
         <statusBarWidgetFactory id="Restful-all.Pet"
                                 implementation="io.github.movebrickschi.restfulall.pet.PetStatusBarWidgetFactory"

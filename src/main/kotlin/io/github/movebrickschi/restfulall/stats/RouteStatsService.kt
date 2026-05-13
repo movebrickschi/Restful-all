@@ -5,6 +5,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.util.messages.Topic
 import io.github.movebrickschi.restfulall.MyMessageBundle
@@ -74,8 +75,9 @@ class RouteStatsService(private val project: Project) {
                     },
                 )
             notification.notify(project)
-        } catch (_: Throwable) {
-            // 通知系统未就绪不影响统计
+        } catch (e: Throwable) {
+            // 通知系统未就绪不影响统计；保留 warn 便于事后定位
+            LOG.warn("Failed to post year-report teaser notification", e)
         }
     }
 
@@ -83,8 +85,8 @@ class RouteStatsService(private val project: Project) {
         ApplicationManager.getApplication().invokeLater {
             try {
                 io.github.movebrickschi.restfulall.action.ShowYearReportAction.showFor(project)
-            } catch (_: Throwable) {
-                // 静默
+            } catch (e: Throwable) {
+                LOG.warn("Failed to open year report from notification action", e)
             }
         }
     }
@@ -186,6 +188,7 @@ class RouteStatsService(private val project: Project) {
         private const val NOTIFICATION_GROUP_ID = "Restful-all.Pro"
         private const val YEAR_REPORT_ACTION_ID = "Restful-all.YearReport"
         private val MILESTONES = listOf(100, 500, 1000)
+        private val LOG = Logger.getInstance(RouteStatsService::class.java)
 
         fun getInstance(project: Project): RouteStatsService =
             project.getService(RouteStatsService::class.java)

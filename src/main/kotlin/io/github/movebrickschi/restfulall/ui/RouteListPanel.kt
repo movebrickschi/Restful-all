@@ -622,7 +622,80 @@ class RouteListPanel(
             add(JMenuItem(MyMessageBundle.message("route.list.action.navigate"), AllIcons.Actions.Find).apply {
                 addActionListener { navigateToSource(route) }
             })
+            addSeparator()
+            add(JMenuItem(
+                MyMessageBundle.message("route.list.action.add.to.collection"),
+                AllIcons.Nodes.Folder,
+            ).apply {
+                addActionListener { addRouteToCollection(route) }
+            })
         }
+
+    /**
+     * v1.3.1 F3 - 把路由加入到 Collection。弹窗 1 步：选已有集合或新建。
+     * 把路由编译成最小 RequestSpecData（method + path），后续用户可在 collection 面板
+     * 双击打开调试面板再补充参数。
+     */
+    private fun addRouteToCollection(route: RouteInfo) {
+        val service = io.github.movebrickschi.restfulall.service.CollectionService.getInstance(project)
+        val existing = service.list()
+        val newOption = MyMessageBundle.message("collection.add.to.new")
+        val options = (existing.map { it.name } + newOption).toTypedArray()
+
+        val chosen = Messages.showEditableChooseDialog(
+            MyMessageBundle.message("collection.add.to.label"),
+            MyMessageBundle.message("collection.add.to.title"),
+            null,
+            options,
+            options.firstOrNull() ?: newOption,
+            null,
+        )?.trim().orEmpty()
+        if (chosen.isEmpty()) return
+
+        try {
+            val target = if (chosen == newOption) {
+                val name = Messages.showInputDialog(
+                    MyMessageBundle.message("collection.new.prompt"),
+                    MyMessageBundle.message("collection.new.title"),
+                    null,
+                )?.trim().orEmpty()
+                if (name.isEmpty()) return
+                val entry = io.github.movebrickschi.restfulall.model.CollectionEntry(name = name)
+                service.upsert(entry)
+                entry
+            } else {
+                existing.firstOrNull { it.name == chosen } ?: run {
+                    val entry = io.github.movebrickschi.restfulall.model.CollectionEntry(name = chosen)
+                    service.upsert(entry)
+                    entry
+                }
+            }
+
+            val itemName = "${route.method.displayName} ${route.displayPath}"
+            val item = io.github.movebrickschi.restfulall.model.CollectionItem(
+                name = itemName,
+                routeRef = route.dedupKey,
+                spec = io.github.movebrickschi.restfulall.model.RequestSpecData(
+                    method = route.method.displayName,
+                    url = route.displayPath,
+                ),
+            )
+            service.addItem(target.id, item)
+
+            io.github.movebrickschi.restfulall.service.RestfulToolWindowHolder
+                .getInstance(project).panel?.collectionPanel?.refresh()
+
+            Messages.showInfoMessage(
+                MyMessageBundle.message("collection.add.to.success", itemName, target.name),
+                MyMessageBundle.message("collection.add.to.title"),
+            )
+        } catch (ex: Exception) {
+            Messages.showErrorDialog(
+                MyMessageBundle.message("collection.add.to.failure", ex.message ?: ""),
+                MyMessageBundle.message("collection.error.title"),
+            )
+        }
+    }
 
     private fun isNavigateIconClick(e: MouseEvent): Boolean {
         val route = routeAt(e.x, e.y) ?: return false

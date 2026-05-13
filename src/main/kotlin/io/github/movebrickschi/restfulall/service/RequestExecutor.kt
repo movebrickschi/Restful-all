@@ -151,14 +151,21 @@ class RequestExecutor(private val project: Project) {
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
             return RequestResult(0, "", emptyMap(), System.currentTimeMillis() - startTime, error = "Interrupted")
-        } catch (e: Exception) {
-            thisLogger().warn("RequestExecutor.execute failed", e)
+        } catch (e: VirtualMachineError) {
+            throw e
+        } catch (e: Throwable) {
+            // 双重脱敏：原始 message 与日志中的 throwable 都先走 redactor
+            // JDK HttpClient 偶尔会把完整 URL（含 query token）放进异常 message，
+            // 直接 `warn("...", e)` 会让明文 token 落到 idea.log 磁盘。
+            val rawMsg = e.message ?: e.javaClass.simpleName
+            val safeMsg = SensitiveDataRedactor.redactPlainText(rawMsg)
+            thisLogger().warn("RequestExecutor.execute failed: $safeMsg (${e.javaClass.simpleName})")
             return RequestResult(
                 statusCode = 0,
                 body = "",
                 headers = emptyMap(),
                 elapsed = System.currentTimeMillis() - startTime,
-                error = e.message ?: e.javaClass.simpleName,
+                error = safeMsg,
             )
         }
     }
@@ -341,7 +348,7 @@ class RequestExecutor(private val project: Project) {
         val envResolved = try {
             EnvironmentService.getInstance(project).resolve(input)
         } catch (e: Exception) {
-            thisLogger().debug("Env variable resolve failed: ${e.message}")
+            thisLogger().debug("Env variable resolve failed: ${e.javaClass.simpleName}", e)
             input
         }
         return BuiltinVariableResolver.resolve(envResolved)

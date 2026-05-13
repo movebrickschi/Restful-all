@@ -27,6 +27,10 @@ dependencies {
         exclude(group = "org.slf4j")
     }
 
+    // F12: Postman / Apifox Collection JSON 解析。swagger-parser 已经传递依赖了 Jackson；
+    // 这里显式声明以避免 transitive 版本飘移导致 Kotlin 编译时 ClassNotFound。
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
+
     testImplementation("junit:junit:4.13.2")
 
     intellijPlatform {

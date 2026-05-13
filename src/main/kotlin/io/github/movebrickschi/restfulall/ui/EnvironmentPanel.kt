@@ -72,6 +72,10 @@ class EnvironmentPanel(private val project: Project) : JPanel(BorderLayout()) {
         bar.add(iconBtn(AllIcons.General.Add) { addEnvironment() })
         bar.add(iconBtn(AllIcons.General.Remove) { deleteEnvironment() })
         bar.add(iconBtn(AllIcons.Actions.MenuSaveall) { saveCurrentEnv() })
+        // P2-10 - Environment diff button (Pro)
+        bar.add(iconBtn(AllIcons.Actions.Diff) { showDiffDialog() })
+        // P1-4 / P1-5 - Team sync setup + push/pull/share (Team)
+        bar.add(iconBtn(AllIcons.General.Web) { openTeamSyncDialog() })
 
         envCombo.addActionListener {
             if (suppressComboEvent) return@addActionListener
@@ -176,6 +180,89 @@ class EnvironmentPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private data class EnvComboItem(val id: String, val name: String) {
         override fun toString(): String = name
+    }
+
+    /**
+     * v1.3.3 P2-10 - 展示环境 diff（Pro）。当前环境 vs 用户选择的另一个环境。
+     *
+     * 因数据量小（单环境最多 200 变量），diff 在 EDT 内同步计算无性能压力。
+     * Pro 校验由 [io.github.movebrickschi.restfulall.service.ProFeatureGate] 完成。
+     */
+    private fun showDiffDialog() {
+        val gateOk = io.github.movebrickschi.restfulall.service.ProFeatureGate.requirePro(
+            project,
+            io.github.movebrickschi.restfulall.service.ProFeature.ENV_DIFF,
+        )
+        if (!gateOk) return
+        val left = currentEnv ?: return
+        val all = envService.listEnvironments().filter { it.id != left.id }
+        if (all.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "No other environment to compare", "Env diff",
+                JOptionPane.INFORMATION_MESSAGE)
+            return
+        }
+        val items = all.map { EnvComboItem(it.id, it.name) }.toTypedArray()
+        val chooser = JComboBox(items)
+        val msg = JPanel(BorderLayout(4, 4)).apply {
+            add(JBLabel("Compare ${left.name} with:"), BorderLayout.NORTH)
+            add(chooser, BorderLayout.CENTER)
+        }
+        val choice = JOptionPane.showConfirmDialog(this, msg, "Env diff", JOptionPane.OK_CANCEL_OPTION)
+        if (choice != JOptionPane.OK_OPTION) return
+        val rightItem = chooser.selectedItem as? EnvComboItem ?: return
+        val right = envService.findById(rightItem.id) ?: return
+
+        val report = io.github.movebrickschi.restfulall.service.EnvironmentDiffService.compare(left, right)
+        val area = javax.swing.JTextArea(formatReport(report)).apply {
+            isEditable = false
+            lineWrap = false
+            tabSize = 2
+            border = JBUI.Borders.empty(8)
+        }
+        val scroll = JBScrollPane(area).apply { preferredSize = Dimension(700, 420) }
+        JOptionPane.showMessageDialog(this, scroll, "Env diff: ${left.name} ⇄ ${right.name}",
+            JOptionPane.INFORMATION_MESSAGE)
+    }
+
+    /**
+     * v1.3.3 P1-4 / P1-5 - 打开 Team 同步对话框（Team）。
+     * Pro/Team gate 由 [io.github.movebrickschi.restfulall.service.ProFeatureGate.WORKSPACE_SYNC] 守卫。
+     */
+    private fun openTeamSyncDialog() {
+        val gateOk = io.github.movebrickschi.restfulall.service.ProFeatureGate.requirePro(
+            project,
+            io.github.movebrickschi.restfulall.service.ProFeature.WORKSPACE_SYNC,
+        )
+        if (!gateOk) return
+        TeamSyncDialog(project).show()
+    }
+
+    private fun formatReport(
+        report: io.github.movebrickschi.restfulall.service.EnvironmentDiffService.DiffReport,
+    ): String = buildString {
+        appendLine("== ${report.leftName} ⇄ ${report.rightName} ==\n")
+        if (report.isEmpty) {
+            appendLine("(no differences)")
+            return@buildString
+        }
+        if (report.onlyLeft.isNotEmpty()) {
+            appendLine("--- Only in ${report.leftName} (${report.onlyLeft.size}) ---")
+            report.onlyLeft.forEach { appendLine("  ${it.key} = ${it.leftValue}") }
+            appendLine()
+        }
+        if (report.onlyRight.isNotEmpty()) {
+            appendLine("--- Only in ${report.rightName} (${report.onlyRight.size}) ---")
+            report.onlyRight.forEach { appendLine("  ${it.key} = ${it.rightValue}") }
+            appendLine()
+        }
+        if (report.valueDiffer.isNotEmpty()) {
+            appendLine("--- Value differs (${report.valueDiffer.size}) ---")
+            report.valueDiffer.forEach {
+                appendLine("  ${it.key}")
+                appendLine("    ${report.leftName}: ${it.leftValue}")
+                appendLine("    ${report.rightName}: ${it.rightValue}")
+            }
+        }
     }
 
     inner class EnvVarTableModel : AbstractTableModel() {

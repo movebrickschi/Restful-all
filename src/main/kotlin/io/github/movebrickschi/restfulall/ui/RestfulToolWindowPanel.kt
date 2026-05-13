@@ -28,6 +28,9 @@ class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout
     }
     val requestHistoryPanel = RequestHistoryPanel(project)
     val environmentPanel = EnvironmentPanel(project)
+    val collectionPanel = CollectionPanel(project) { item ->
+        apiDebugPanel.loadCollectionItem(item)
+    }
 
     private val listCardLayout = CardLayout()
     private val listCardPanel = JPanel(listCardLayout)
@@ -58,6 +61,7 @@ class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout
         listCardPanel.add(routeListPanel, CARD_ROUTES)
         listCardPanel.add(requestHistoryPanel, CARD_HISTORY)
         listCardPanel.add(environmentPanel, CARD_ENVIRONMENT)
+        listCardPanel.add(collectionPanel, CARD_COLLECTIONS)
 
         requestHistoryPanel.setOnLoadToDebug { entry ->
             apiDebugPanel.loadHistoryEntry(entry)
@@ -83,6 +87,7 @@ class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout
     override fun dispose() {
         routeListPanel.dispose()
         requestHistoryPanel.dispose()
+        collectionPanel.dispose()
         apiDebugPanel.dispose()
     }
 
@@ -160,9 +165,15 @@ class RestfulToolWindowPanel(private val project: Project) : JPanel(BorderLayout
         listCardLayout.show(listCardPanel, CARD_ENVIRONMENT)
     }
 
+    fun showCollections() {
+        collectionPanel.refresh()
+        listCardLayout.show(listCardPanel, CARD_COLLECTIONS)
+    }
+
     companion object {
         private const val CARD_ROUTES = "routes"
         private const val CARD_HISTORY = "history"
         private const val CARD_ENVIRONMENT = "environment"
+        private const val CARD_COLLECTIONS = "collections"
     }
 }

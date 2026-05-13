@@ -1,5 +1,6 @@
 package io.github.movebrickschi.restfulall.ui
 
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.colors.EditorFontType
 import com.intellij.ui.JBColor
@@ -25,7 +26,7 @@ import javax.swing.text.StyledDocument
  * Non-JSON text (error messages, streaming plain text) is rendered without
  * any color attributes, using the component's default foreground.
  */
-class JsonSyntaxTextPane(editable: Boolean = false) : JTextPane() {
+class JsonSyntaxTextPane(editable: Boolean = false) : JTextPane(), Disposable {
 
     companion object {
         private val KEY_ATTRS = SimpleAttributeSet().also {
@@ -79,6 +80,19 @@ class JsonSyntaxTextPane(editable: Boolean = false) : JTextPane() {
 
     /** Ensure the pane tracks the viewport width so content wraps instead of scrolling horizontally. */
     override fun getScrollableTracksViewportWidth(): Boolean = true
+
+    /**
+     * 释放内部 Swing Timer。无显式 [dispose] 路径时（部分调用方未把本组件挂到 Disposer），
+     * 通过 [removeNotify] 兜底——组件从 UI 层级移除时也会触发，避免长寿命 Timer 持有外部引用。
+     */
+    override fun dispose() {
+        debounceTimer.stop()
+    }
+
+    override fun removeNotify() {
+        debounceTimer.stop()
+        super.removeNotify()
+    }
 
     override fun setText(t: String?) {
         val text = t ?: ""

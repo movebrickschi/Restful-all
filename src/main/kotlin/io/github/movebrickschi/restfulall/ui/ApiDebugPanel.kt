@@ -28,6 +28,8 @@ import io.github.movebrickschi.restfulall.service.LanguageChangeListener
 import io.github.movebrickschi.restfulall.service.NestJsParamExtractor
 import io.github.movebrickschi.restfulall.service.PluginSettingsState
 import io.github.movebrickschi.restfulall.service.PythonParamExtractor
+import io.github.movebrickschi.restfulall.service.MultipartFormParam
+import io.github.movebrickschi.restfulall.service.RequestExecutor
 import io.github.movebrickschi.restfulall.service.RequestSpec
 import io.github.movebrickschi.restfulall.service.SpringPsiParamExtractor
 import java.awt.BorderLayout
@@ -40,16 +42,11 @@ import java.net.URI
 import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpHeaders
-import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.net.http.WebSocket
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.Path
 import java.time.Duration
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
 import javax.swing.*
@@ -543,69 +540,6 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
 
-    private fun buildUrlencodedBody(params: List<Pair<String, String>>): Pair<HttpRequest.BodyPublisher, String> {
-        val encoded = params.joinToString("&") { (k, v) ->
-            "${URLEncoder.encode(k, Charsets.UTF_8)}=${URLEncoder.encode(v, Charsets.UTF_8)}"
-        }
-        return HttpRequest.BodyPublishers.ofString(encoded) to "application/x-www-form-urlencoded"
-    }
-
-    private fun buildMultipartBody(
-        params: List<Triple<String, String, String>>
-    ): Pair<HttpRequest.BodyPublisher, String> {
-        val boundary = "----FormBoundary${UUID.randomUUID().toString().replace("-", "")}"
-        val byteArrays = mutableListOf<ByteArray>()
-        val lineBreak = "\r\n".toByteArray(StandardCharsets.UTF_8)
-        var runningSize = 0L
-
-        for ((name, value, type) in params) {
-            byteArrays.add("--$boundary\r\n".toByteArray(StandardCharsets.UTF_8))
-            if (type == "file") {
-                val filePath = Path.of(value)
-                check(Files.isRegularFile(filePath)) {
-                    "Multipart file not found or not a regular file: $value"
-                }
-                check(Files.isReadable(filePath)) {
-                    "Multipart file not readable: $value"
-                }
-                val fileSize = Files.size(filePath)
-                check(fileSize <= MAX_MULTIPART_FILE_BYTES) {
-                    "Multipart file too large (${fileSize / 1024 / 1024} MB), max=${MAX_MULTIPART_FILE_BYTES / 1024 / 1024} MB: $value"
-                }
-                runningSize += fileSize
-                check(runningSize <= MAX_MULTIPART_TOTAL_BYTES) {
-                    "Multipart total body too large (>${MAX_MULTIPART_TOTAL_BYTES / 1024 / 1024} MB), please reduce file count"
-                }
-
-                val fileName = filePath.fileName.toString()
-                byteArrays.add(
-                    "Content-Disposition: form-data; name=\"$name\"; filename=\"$fileName\"\r\n".toByteArray(StandardCharsets.UTF_8)
-                )
-                val mimeType = Files.probeContentType(filePath) ?: "application/octet-stream"
-                byteArrays.add("Content-Type: $mimeType\r\n\r\n".toByteArray(StandardCharsets.UTF_8))
-                byteArrays.add(Files.readAllBytes(filePath))
-                byteArrays.add(lineBreak)
-            } else {
-                byteArrays.add(
-                    "Content-Disposition: form-data; name=\"$name\"\r\n\r\n".toByteArray(StandardCharsets.UTF_8)
-                )
-                byteArrays.add(value.toByteArray(StandardCharsets.UTF_8))
-                byteArrays.add(lineBreak)
-            }
-        }
-        byteArrays.add("--$boundary--\r\n".toByteArray(StandardCharsets.UTF_8))
-
-        val totalSize = byteArrays.sumOf { it.size }
-        val result = ByteArray(totalSize)
-        var offset = 0
-        for (arr in byteArrays) {
-            System.arraycopy(arr, 0, result, offset, arr.size)
-            offset += arr.size
-        }
-
-        return HttpRequest.BodyPublishers.ofByteArray(result) to "multipart/form-data; boundary=$boundary"
-    }
-
     // ── gzip / deflate decompression ──────────────────────────────────────────
 
     private fun decompressIfNeeded(stream: InputStream, headers: HttpHeaders): InputStream {
@@ -678,79 +612,36 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
             formParams = getFormParamEntries(),
         )
 
+        val requestSpec = RequestSpec(
+            method = method,
+            url = finalUrl,
+            headers = mergedHeaders,
+            cookies = mergedCookies,
+            bodyType = bodyType,
+            bodyContent = bodyContent,
+            formParams = getFormParamEntries(),
+        )
+        val multipartParams = if (bodyType == "form-data") {
+            formDataPanel.getParams().map { (name, value, type) ->
+                MultipartFormParam(name = name, value = value, type = type)
+            }
+        } else {
+            emptyList()
+        }
+        val requestExecutor = RequestExecutor.getInstance(project)
+
         val thread = Thread {
             var reconnectCount = 0
             var lastEventId: String? = null
 
             loop@ while (true) {
                 try {
-                    val builder = HttpRequest.newBuilder()
-                        .uri(URI.create(finalUrl))
-                        .timeout(Duration.ofSeconds(30))
-
-                    for ((name, value) in mergedHeaders) {
-                        if (name.isNotBlank()) builder.header(name, value)
-                    }
-
-                    if (mergedCookies.isNotEmpty()) {
-                        builder.header("Cookie", mergedCookies.joinToString("; ") { "${it.first}=${it.second}" })
-                    }
-
-                    if (lastEventId != null) {
-                        builder.header("Last-Event-ID", lastEventId)
-                    }
-
-                    val bodyPublisher: HttpRequest.BodyPublisher
-                    var contentType: String? = null
-
-                    if (method in METHODS_WITH_BODY) {
-                        when (bodyType) {
-                            "none" -> bodyPublisher = HttpRequest.BodyPublishers.noBody()
-                            "form-data" -> {
-                                val (pub, ct) = buildMultipartBody(formDataPanel.getParams())
-                                bodyPublisher = pub
-                                contentType = ct
-                            }
-                            "x-www-form-urlencoded" -> {
-                                val (pub, ct) = buildUrlencodedBody(urlEncodedPanel.getParams())
-                                bodyPublisher = pub
-                                contentType = ct
-                            }
-                            "json" -> {
-                                bodyPublisher = if (bodyContent.isNotBlank())
-                                    HttpRequest.BodyPublishers.ofString(bodyContent)
-                                else
-                                    HttpRequest.BodyPublishers.noBody()
-                                contentType = "application/json"
-                            }
-                            "xml" -> {
-                                bodyPublisher = if (bodyContent.isNotBlank())
-                                    HttpRequest.BodyPublishers.ofString(bodyContent)
-                                else
-                                    HttpRequest.BodyPublishers.noBody()
-                                contentType = "application/xml"
-                            }
-                            "raw" -> {
-                                bodyPublisher = if (bodyContent.isNotBlank())
-                                    HttpRequest.BodyPublishers.ofString(bodyContent)
-                                else
-                                    HttpRequest.BodyPublishers.noBody()
-                            }
-                            else -> bodyPublisher = HttpRequest.BodyPublishers.noBody()
-                        }
-                    } else {
-                        bodyPublisher = HttpRequest.BodyPublishers.noBody()
-                    }
-
-                    if (contentType != null) {
-                        val hasContentType = mergedHeaders.any { it.first.equals("Content-Type", ignoreCase = true) }
-                        if (!hasContentType) builder.header("Content-Type", contentType)
-                    }
-
-                    builder.method(method, bodyPublisher)
-
                     val startTime = System.currentTimeMillis()
-                    val response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream())
+                    val response = requestExecutor.send(
+                        requestSpec,
+                        extraHeaders = lastEventId?.let { listOf("Last-Event-ID" to it) }.orEmpty(),
+                        multipartParams = multipartParams,
+                    )
 
                     val respContentType = response.headers().firstValue("content-type").orElse("")
                     val isSSE = respContentType.contains("text/event-stream", ignoreCase = true)
@@ -799,21 +690,12 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
                         }
                         isNdjson -> handleNdjsonStream(response, historyEntry, startTime, state)
                         else -> {
-                            val bodyStream = decompressIfNeeded(response.body(), response.headers())
-                            val (bodyBytes, truncated) =
-                                io.github.movebrickschi.restfulall.service.IoSafetyUtil.readBoundedBytes(
-                                    bodyStream,
-                                    io.github.movebrickschi.restfulall.service.RequestExecutor.MAX_RESPONSE_BYTES,
-                                )
-                            val charset = io.github.movebrickschi.restfulall.service.parseResponseCharset(
-                                response.headers().firstValue("content-type").orElse(""),
-                            )
-                            val rawBody = String(bodyBytes, charset)
-                            val bodyString = if (truncated) {
-                                rawBody + "\n\n[Response truncated: exceeded " +
-                                    "${io.github.movebrickschi.restfulall.service.RequestExecutor.MAX_RESPONSE_BYTES / 1024 / 1024} MB cap]"
+                            val responseBody = requestExecutor.readResponseBody(response)
+                            val bodyString = if (responseBody.truncated) {
+                                responseBody.text + "\n\n[Response truncated: exceeded " +
+                                    "${RequestExecutor.MAX_RESPONSE_BYTES / 1024 / 1024} MB cap]"
                             } else {
-                                rawBody
+                                responseBody.text
                             }
                             val elapsed = System.currentTimeMillis() - startTime
 
@@ -1360,9 +1242,6 @@ class ApiDebugPanel(private val project: Project) : JPanel(BorderLayout()) {
         private val WARN_COLOR = JBColor(Color(0xCC, 0x80, 0x00), Color(0xE5, 0xC0, 0x7B))
         private val ERROR_COLOR = JBColor(Color(0xCC, 0x00, 0x00), Color(0xE0, 0x6C, 0x75))
         private val WS_TIME_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
-
-        private const val MAX_MULTIPART_FILE_BYTES: Long = 50L * 1024 * 1024
-        private const val MAX_MULTIPART_TOTAL_BYTES: Long = 100L * 1024 * 1024
 
         private const val SSE_MIN_RETRY_MS: Long = 1_000L
         private const val SSE_MAX_RETRY_MS: Long = 60_000L

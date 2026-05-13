@@ -35,6 +35,17 @@ data class RequestSpec(
 )
 
 /**
+ * v1.3.1 - multipart/form-data 单个字段。
+ *
+ * [type] 取值为 `"text"` 或 `"file"`；file 时 [value] 是本地文件路径。
+ */
+data class MultipartFormParam(
+    val name: String,
+    val value: String,
+    val type: String = "text",
+)
+
+/**
  * v1.3 - 请求结果。
  */
 data class RequestResult(
@@ -86,6 +97,9 @@ class RequestExecutor(private val project: Project) {
     companion object {
         private val METHODS_WITH_BODY = setOf("POST", "PUT", "PATCH", "DELETE")
 
+        private const val MAX_MULTIPART_FILE_BYTES: Long = 50L * 1024 * 1024
+        private const val MAX_MULTIPART_TOTAL_BYTES: Long = 100L * 1024 * 1024
+
         /**
          * 响应体硬上限，防止恶意 / 误配后端返回 GB 级响应导致 OOM。
          * 超出后截断至上限并把 [RequestResult.error] 标记为 "response truncated"，
@@ -110,116 +124,25 @@ class RequestExecutor(private val project: Project) {
     fun execute(spec: RequestSpec): RequestResult {
         val startTime = System.currentTimeMillis()
         try {
-            var url = resolveVariables(spec.url)
-
-            for ((name, value) in spec.pathParams) {
-                val encoded = URLEncoder.encode(value, Charsets.UTF_8)
-                url = url.replace("{$name}", encoded).replace(":$name", encoded)
-            }
-
-            val resolvedQuery = spec.queryParams.map { (k, v) ->
-                resolveVariables(k) to resolveVariables(v)
-            }
-            if (resolvedQuery.isNotEmpty()) {
-                val qs = resolvedQuery.joinToString("&") { (k, v) ->
-                    "${URLEncoder.encode(k, Charsets.UTF_8)}=${URLEncoder.encode(v, Charsets.UTF_8)}"
-                }
-                url = if ("?" in url) "$url&$qs" else "$url?$qs"
-            }
-
-            if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                url = "http://$url"
-            }
-
-            val builder = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(spec.timeoutSeconds))
-
-            val resolvedHeaders = spec.headers.map { (k, v) ->
-                resolveVariables(k) to resolveVariables(v)
-            }
-            for ((name, value) in resolvedHeaders) {
-                if (name.isNotBlank()) builder.header(name, value)
-            }
-
-            val resolvedCookies = spec.cookies.map { (k, v) ->
-                resolveVariables(k) to resolveVariables(v)
-            }
-            if (resolvedCookies.isNotEmpty()) {
-                builder.header("Cookie", resolvedCookies.joinToString("; ") { "${it.first}=${it.second}" })
-            }
-
-            val bodyContent = resolveVariables(spec.bodyContent)
-            val bodyPublisher: HttpRequest.BodyPublisher
-            var contentType: String? = null
-
-            if (spec.method.uppercase() in METHODS_WITH_BODY) {
-                when (spec.bodyType) {
-                    "none" -> bodyPublisher = HttpRequest.BodyPublishers.noBody()
-                    "json" -> {
-                        bodyPublisher = if (bodyContent.isNotBlank())
-                            HttpRequest.BodyPublishers.ofString(bodyContent)
-                        else HttpRequest.BodyPublishers.noBody()
-                        contentType = "application/json"
-                    }
-                    "xml" -> {
-                        bodyPublisher = if (bodyContent.isNotBlank())
-                            HttpRequest.BodyPublishers.ofString(bodyContent)
-                        else HttpRequest.BodyPublishers.noBody()
-                        contentType = "application/xml"
-                    }
-                    "raw" -> {
-                        bodyPublisher = if (bodyContent.isNotBlank())
-                            HttpRequest.BodyPublishers.ofString(bodyContent)
-                        else HttpRequest.BodyPublishers.noBody()
-                    }
-                    "x-www-form-urlencoded" -> {
-                        val encoded = spec.formParams
-                            .filter { it.enabled && it.name.isNotBlank() }
-                            .joinToString("&") { p ->
-                                "${URLEncoder.encode(p.name, Charsets.UTF_8)}=${URLEncoder.encode(p.value, Charsets.UTF_8)}"
-                            }
-                        bodyPublisher = HttpRequest.BodyPublishers.ofString(encoded)
-                        contentType = "application/x-www-form-urlencoded"
-                    }
-                    else -> bodyPublisher = HttpRequest.BodyPublishers.noBody()
-                }
-            } else {
-                bodyPublisher = HttpRequest.BodyPublishers.noBody()
-            }
-
-            if (contentType != null) {
-                val hasContentType = resolvedHeaders.any { it.first.equals("Content-Type", ignoreCase = true) }
-                if (!hasContentType) builder.header("Content-Type", contentType)
-            }
-
-            builder.method(spec.method.uppercase(), bodyPublisher)
-
-            val response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream())
-            val respContentType = response.headers().firstValue("content-type").orElse("")
+            val response = send(spec)
+            val responseBody = readResponseBody(response)
+            val respContentType = responseBody.contentType
             val isSSE = respContentType.contains("text/event-stream", ignoreCase = true)
             val isNdjson = !isSSE && (
                 respContentType.contains("x-ndjson", ignoreCase = true) ||
                 respContentType.contains("jsonlines", ignoreCase = true)
             )
-
-            val bodyStream = decompressIfNeeded(response.body(), response.headers())
-            val (bodyBytes, truncated) = IoSafetyUtil.readBoundedBytes(bodyStream, MAX_RESPONSE_BYTES)
-            val charset = parseResponseCharset(respContentType) { name ->
-                thisLogger().info("Unknown response charset '$name', falling back to UTF-8")
-            }
-            val bodyString = String(bodyBytes, charset)
             val elapsed = System.currentTimeMillis() - startTime
 
             return RequestResult(
                 statusCode = response.statusCode(),
-                body = bodyString,
+                body = responseBody.text,
                 headers = response.headers().map(),
                 elapsed = elapsed,
                 contentType = respContentType,
                 isSSE = isSSE,
                 isNdjson = isNdjson,
-                error = if (truncated) {
+                error = if (responseBody.truncated) {
                     "response truncated: exceeded ${MAX_RESPONSE_BYTES / 1024 / 1024} MB cap"
                 } else {
                     null
@@ -238,6 +161,175 @@ class RequestExecutor(private val project: Project) {
                 error = e.message ?: e.javaClass.simpleName,
             )
         }
+    }
+
+    fun send(
+        spec: RequestSpec,
+        extraHeaders: List<Pair<String, String>> = emptyList(),
+        multipartParams: List<MultipartFormParam> = emptyList(),
+    ): HttpResponse<InputStream> {
+        val request = buildRequest(spec, extraHeaders, multipartParams)
+        return httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
+    }
+
+    fun readResponseBody(response: HttpResponse<InputStream>): ResponseBodyData {
+        val contentType = response.headers().firstValue("content-type").orElse("")
+        val bodyStream = decompressIfNeeded(response.body(), response.headers())
+        val (bodyBytes, truncated) = IoSafetyUtil.readBoundedBytes(bodyStream, MAX_RESPONSE_BYTES)
+        val charset = parseResponseCharset(contentType) { name ->
+            thisLogger().info("Unknown response charset '$name', falling back to UTF-8")
+        }
+        return ResponseBodyData(
+            text = String(bodyBytes, charset),
+            contentType = contentType,
+            truncated = truncated,
+        )
+    }
+
+    private fun buildRequest(
+        spec: RequestSpec,
+        extraHeaders: List<Pair<String, String>>,
+        multipartParams: List<MultipartFormParam>,
+    ): HttpRequest {
+        var url = resolveVariables(spec.url)
+
+        for ((name, value) in spec.pathParams) {
+            val encoded = URLEncoder.encode(value, Charsets.UTF_8)
+            url = url.replace("{$name}", encoded).replace(":$name", encoded)
+        }
+
+        val resolvedQuery = spec.queryParams.map { (k, v) ->
+            resolveVariables(k) to resolveVariables(v)
+        }
+        if (resolvedQuery.isNotEmpty()) {
+            val qs = resolvedQuery.joinToString("&") { (k, v) ->
+                "${URLEncoder.encode(k, Charsets.UTF_8)}=${URLEncoder.encode(v, Charsets.UTF_8)}"
+            }
+            url = if ("?" in url) "$url&$qs" else "$url?$qs"
+        }
+
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            url = "http://$url"
+        }
+
+        val builder = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .timeout(Duration.ofSeconds(spec.timeoutSeconds))
+
+        val resolvedHeaders = spec.headers.map { (k, v) ->
+            resolveVariables(k) to resolveVariables(v)
+        }
+        for ((name, value) in resolvedHeaders) {
+            if (name.isNotBlank()) builder.header(name, value)
+        }
+        for ((name, value) in extraHeaders) {
+            if (name.isNotBlank()) builder.header(name, value)
+        }
+
+        val resolvedCookies = spec.cookies.map { (k, v) ->
+            resolveVariables(k) to resolveVariables(v)
+        }
+        if (resolvedCookies.isNotEmpty()) {
+            builder.header("Cookie", resolvedCookies.joinToString("; ") { "${it.first}=${it.second}" })
+        }
+
+        val (bodyPublisher, contentType) = buildBodyPublisher(spec, multipartParams)
+        if (contentType != null) {
+            val hasContentType = (resolvedHeaders + extraHeaders).any {
+                it.first.equals("Content-Type", ignoreCase = true)
+            }
+            if (!hasContentType) builder.header("Content-Type", contentType)
+        }
+
+        return builder.method(spec.method.uppercase(), bodyPublisher).build()
+    }
+
+    private fun buildBodyPublisher(
+        spec: RequestSpec,
+        multipartParams: List<MultipartFormParam>,
+    ): Pair<HttpRequest.BodyPublisher, String?> {
+        if (spec.method.uppercase() !in METHODS_WITH_BODY) {
+            return HttpRequest.BodyPublishers.noBody() to null
+        }
+
+        val bodyContent = resolveVariables(spec.bodyContent)
+        return when (spec.bodyType) {
+            "none" -> HttpRequest.BodyPublishers.noBody() to null
+            "json" -> bodyContent.toBodyPublisher() to "application/json"
+            "xml" -> bodyContent.toBodyPublisher() to "application/xml"
+            "raw" -> bodyContent.toBodyPublisher() to null
+            "x-www-form-urlencoded" -> {
+                val encoded = spec.formParams
+                    .filter { it.enabled && it.name.isNotBlank() }
+                    .joinToString("&") { p ->
+                        "${URLEncoder.encode(resolveVariables(p.name), Charsets.UTF_8)}=" +
+                            URLEncoder.encode(resolveVariables(p.value), Charsets.UTF_8)
+                    }
+                HttpRequest.BodyPublishers.ofString(encoded) to "application/x-www-form-urlencoded"
+            }
+            "form-data" -> buildMultipartBody(multipartParams)
+            else -> HttpRequest.BodyPublishers.noBody() to null
+        }
+    }
+
+    private fun String.toBodyPublisher(): HttpRequest.BodyPublisher =
+        if (isNotBlank()) HttpRequest.BodyPublishers.ofString(this) else HttpRequest.BodyPublishers.noBody()
+
+    private fun buildMultipartBody(
+        params: List<MultipartFormParam>,
+    ): Pair<HttpRequest.BodyPublisher, String> {
+        val boundary = "----FormBoundary${java.util.UUID.randomUUID().toString().replace("-", "")}"
+        val byteArrays = mutableListOf<ByteArray>()
+        val lineBreak = "\r\n".toByteArray(Charsets.UTF_8)
+        var runningSize = 0L
+
+        for ((name, value, type) in params.filter { it.name.isNotBlank() }) {
+            byteArrays.add("--$boundary\r\n".toByteArray(Charsets.UTF_8))
+            if (type == "file") {
+                val filePath = java.nio.file.Path.of(resolveVariables(value))
+                check(java.nio.file.Files.isRegularFile(filePath)) {
+                    "Multipart file not found or not a regular file: $value"
+                }
+                check(java.nio.file.Files.isReadable(filePath)) {
+                    "Multipart file not readable: $value"
+                }
+                val fileSize = java.nio.file.Files.size(filePath)
+                check(fileSize <= MAX_MULTIPART_FILE_BYTES) {
+                    "Multipart file too large (${fileSize / 1024 / 1024} MB), max=${MAX_MULTIPART_FILE_BYTES / 1024 / 1024} MB: $value"
+                }
+                runningSize += fileSize
+                check(runningSize <= MAX_MULTIPART_TOTAL_BYTES) {
+                    "Multipart total body too large (>${MAX_MULTIPART_TOTAL_BYTES / 1024 / 1024} MB), please reduce file count"
+                }
+
+                val fileName = filePath.fileName.toString()
+                byteArrays.add(
+                    "Content-Disposition: form-data; name=\"$name\"; filename=\"$fileName\"\r\n"
+                        .toByteArray(Charsets.UTF_8),
+                )
+                val mimeType = java.nio.file.Files.probeContentType(filePath) ?: "application/octet-stream"
+                byteArrays.add("Content-Type: $mimeType\r\n\r\n".toByteArray(Charsets.UTF_8))
+                byteArrays.add(java.nio.file.Files.readAllBytes(filePath))
+                byteArrays.add(lineBreak)
+            } else {
+                byteArrays.add(
+                    "Content-Disposition: form-data; name=\"$name\"\r\n\r\n".toByteArray(Charsets.UTF_8),
+                )
+                byteArrays.add(resolveVariables(value).toByteArray(Charsets.UTF_8))
+                byteArrays.add(lineBreak)
+            }
+        }
+        byteArrays.add("--$boundary--\r\n".toByteArray(Charsets.UTF_8))
+
+        val totalSize = byteArrays.sumOf { it.size }
+        val result = ByteArray(totalSize)
+        var offset = 0
+        for (arr in byteArrays) {
+            System.arraycopy(arr, 0, result, offset, arr.size)
+            offset += arr.size
+        }
+
+        return HttpRequest.BodyPublishers.ofByteArray(result) to "multipart/form-data; boundary=$boundary"
     }
 
     private fun resolveVariables(input: String): String {
@@ -265,6 +357,12 @@ class RequestExecutor(private val project: Project) {
     }
 
 }
+
+data class ResponseBodyData(
+    val text: String,
+    val contentType: String,
+    val truncated: Boolean,
+)
 
 private val CHARSET_PATTERN = Regex("(?i)charset\\s*=\\s*([^;\\s]+)")
 

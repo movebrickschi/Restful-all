@@ -3,13 +3,17 @@ package io.github.movebrickschi.restfulall.export
 import io.github.movebrickschi.restfulall.model.ExtractedFormParam
 import io.github.movebrickschi.restfulall.model.ExtractedMethodParams
 import io.github.movebrickschi.restfulall.model.ExtractedParam
+import io.github.movebrickschi.restfulall.model.ParamEntry
 import io.github.movebrickschi.restfulall.model.RouteInfo
+import io.github.movebrickschi.restfulall.service.SensitiveDataRedactor
 import java.util.Locale
 
 data class ApiDocumentOptions(
     val title: String,
     val version: String,
     val description: String = "",
+    val includeSourcePath: Boolean = false,
+    val redactExamples: Boolean = true,
 )
 
 enum class ApiDocumentFormat(
@@ -76,14 +80,67 @@ object ApiDocumentExporter {
         endpoints: List<ApiExportEndpoint>,
         format: ApiDocumentFormat,
         options: ApiDocumentOptions,
-    ): String =
-        when (format) {
-            ApiDocumentFormat.OPENAPI_JSON -> JsonEmitter.emit(buildOpenApiDocument(endpoints, options))
-            ApiDocumentFormat.OPENAPI_YAML -> YamlEmitter.emit(buildOpenApiDocument(endpoints, options))
-            ApiDocumentFormat.SWAGGER_JSON -> JsonEmitter.emit(buildSwaggerDocument(endpoints, options))
-            ApiDocumentFormat.SWAGGER_YAML -> YamlEmitter.emit(buildSwaggerDocument(endpoints, options))
-            ApiDocumentFormat.MARKDOWN -> MarkdownEmitter.emit(endpoints, options)
+    ): String {
+        val safeEndpoints = sanitizeEndpoints(endpoints, options)
+        return when (format) {
+            ApiDocumentFormat.OPENAPI_JSON -> JsonEmitter.emit(buildOpenApiDocument(safeEndpoints, options))
+            ApiDocumentFormat.OPENAPI_YAML -> YamlEmitter.emit(buildOpenApiDocument(safeEndpoints, options))
+            ApiDocumentFormat.SWAGGER_JSON -> JsonEmitter.emit(buildSwaggerDocument(safeEndpoints, options))
+            ApiDocumentFormat.SWAGGER_YAML -> YamlEmitter.emit(buildSwaggerDocument(safeEndpoints, options))
+            ApiDocumentFormat.MARKDOWN -> MarkdownEmitter.emit(safeEndpoints, options)
         }
+    }
+
+    private fun sanitizeEndpoints(
+        endpoints: List<ApiExportEndpoint>,
+        options: ApiDocumentOptions,
+    ): List<ApiExportEndpoint> {
+        if (options.includeSourcePath && !options.redactExamples) return endpoints
+        return endpoints.map { endpoint ->
+            endpoint.copy(
+                sourcePath = if (options.includeSourcePath) endpoint.sourcePath else endpoint.sourceFileName,
+                queryParams = endpoint.queryParams.map { sanitizeParam(it, options) },
+                pathParams = endpoint.pathParams.map { sanitizeParam(it, options) },
+                headerParams = endpoint.headerParams.map { sanitizeHeaderParam(it, options) },
+                cookieParams = endpoint.cookieParams.map { sanitizeCookieParam(it, options) },
+                bodyJson = endpoint.bodyJson?.let { sanitizeBody(it, options) },
+                formParams = endpoint.formParams.map { sanitizeFormParam(it, options) },
+                responseJson = endpoint.responseJson?.let { sanitizeBody(it, options) },
+            )
+        }
+    }
+
+    private fun sanitizeParam(param: ExtractedParam, options: ApiDocumentOptions): ExtractedParam {
+        if (!options.redactExamples || param.testValue.isBlank()) return param
+        val redacted = SensitiveDataRedactor.redactParam(
+            ParamEntry(enabled = true, name = param.name, value = param.testValue),
+        ).value
+        return param.copy(testValue = redacted)
+    }
+
+    private fun sanitizeHeaderParam(param: ExtractedParam, options: ApiDocumentOptions): ExtractedParam {
+        if (!options.redactExamples || param.testValue.isBlank()) return param
+        val redacted = SensitiveDataRedactor.redactHeader(
+            ParamEntry(enabled = true, name = param.name, value = param.testValue),
+        ).value
+        return param.copy(testValue = redacted)
+    }
+
+    private fun sanitizeCookieParam(param: ExtractedParam, options: ApiDocumentOptions): ExtractedParam {
+        if (!options.redactExamples || param.testValue.isBlank()) return param
+        return param.copy(testValue = SensitiveDataRedactor.REDACTED)
+    }
+
+    private fun sanitizeFormParam(param: ExtractedFormParam, options: ApiDocumentOptions): ExtractedFormParam {
+        if (!options.redactExamples || param.testValue.isBlank()) return param
+        val redacted = SensitiveDataRedactor.redactParam(
+            ParamEntry(enabled = true, name = param.name, value = param.testValue),
+        ).value
+        return param.copy(testValue = redacted)
+    }
+
+    private fun sanitizeBody(body: String, options: ApiDocumentOptions): String =
+        if (options.redactExamples) SensitiveDataRedactor.redactBody(body) else body
 
     private fun buildOpenApiDocument(
         endpoints: List<ApiExportEndpoint>,

@@ -69,6 +69,8 @@ class ApiDocumentExportSelectionModelTest {
             title = "Project API",
             version = "2.0.0",
             description = "Selected routes only",
+            includeSourcePath = false,
+            redactExamples = true,
         )
 
         ApiDocumentExportSelectionModel.persistOptions(

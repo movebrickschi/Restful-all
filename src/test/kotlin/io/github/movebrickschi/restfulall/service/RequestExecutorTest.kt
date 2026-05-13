@@ -94,4 +94,11 @@ class RequestExecutorTest {
         assertFalse("GET should not have body", "GET" in expected)
         assertFalse("HEAD should not have body", "HEAD" in expected)
     }
+
+    @Test
+    fun `multipart header values should escape unsafe characters`() {
+        assertEquals("field\\\"name", escapeMultipartHeaderValue("field\"name"))
+        assertEquals("file\\\\name.txt", escapeMultipartHeaderValue("file\\name.txt"))
+        assertEquals("badname", escapeMultipartHeaderValue("bad\r\nname"))
+    }
 }

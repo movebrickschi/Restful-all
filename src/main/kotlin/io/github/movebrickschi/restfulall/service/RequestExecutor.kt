@@ -279,12 +279,32 @@ class RequestExecutor(private val project: Project) {
         params: List<MultipartFormParam>,
     ): Pair<HttpRequest.BodyPublisher, String> {
         val boundary = "----FormBoundary${java.util.UUID.randomUUID().toString().replace("-", "")}"
-        val byteArrays = mutableListOf<ByteArray>()
-        val lineBreak = "\r\n".toByteArray(Charsets.UTF_8)
+        val publishers = mutableListOf<HttpRequest.BodyPublisher>()
         var runningSize = 0L
 
+        fun addBytes(bytes: ByteArray) {
+            runningSize += bytes.size
+            check(runningSize <= MAX_MULTIPART_TOTAL_BYTES) {
+                "Multipart total body too large (>${MAX_MULTIPART_TOTAL_BYTES / 1024 / 1024} MB), please reduce file count"
+            }
+            publishers.add(HttpRequest.BodyPublishers.ofByteArray(bytes))
+        }
+
+        fun addString(value: String) {
+            addBytes(value.toByteArray(Charsets.UTF_8))
+        }
+
+        fun addFile(filePath: java.nio.file.Path, fileSize: Long) {
+            runningSize += fileSize
+            check(runningSize <= MAX_MULTIPART_TOTAL_BYTES) {
+                "Multipart total body too large (>${MAX_MULTIPART_TOTAL_BYTES / 1024 / 1024} MB), please reduce file count"
+            }
+            publishers.add(HttpRequest.BodyPublishers.ofFile(filePath))
+        }
+
         for ((name, value, type) in params.filter { it.name.isNotBlank() }) {
-            byteArrays.add("--$boundary\r\n".toByteArray(Charsets.UTF_8))
+            val safeName = escapeMultipartHeaderValue(name)
+            addString("--$boundary\r\n")
             if (type == "file") {
                 val filePath = java.nio.file.Path.of(resolveVariables(value))
                 check(java.nio.file.Files.isRegularFile(filePath)) {
@@ -297,39 +317,23 @@ class RequestExecutor(private val project: Project) {
                 check(fileSize <= MAX_MULTIPART_FILE_BYTES) {
                     "Multipart file too large (${fileSize / 1024 / 1024} MB), max=${MAX_MULTIPART_FILE_BYTES / 1024 / 1024} MB: $value"
                 }
-                runningSize += fileSize
-                check(runningSize <= MAX_MULTIPART_TOTAL_BYTES) {
-                    "Multipart total body too large (>${MAX_MULTIPART_TOTAL_BYTES / 1024 / 1024} MB), please reduce file count"
-                }
 
-                val fileName = filePath.fileName.toString()
-                byteArrays.add(
-                    "Content-Disposition: form-data; name=\"$name\"; filename=\"$fileName\"\r\n"
-                        .toByteArray(Charsets.UTF_8),
-                )
+                val fileName = escapeMultipartHeaderValue(filePath.fileName.toString())
+                addString("Content-Disposition: form-data; name=\"$safeName\"; filename=\"$fileName\"\r\n")
                 val mimeType = java.nio.file.Files.probeContentType(filePath) ?: "application/octet-stream"
-                byteArrays.add("Content-Type: $mimeType\r\n\r\n".toByteArray(Charsets.UTF_8))
-                byteArrays.add(java.nio.file.Files.readAllBytes(filePath))
-                byteArrays.add(lineBreak)
+                addString("Content-Type: $mimeType\r\n\r\n")
+                addFile(filePath, fileSize)
+                addString("\r\n")
             } else {
-                byteArrays.add(
-                    "Content-Disposition: form-data; name=\"$name\"\r\n\r\n".toByteArray(Charsets.UTF_8),
-                )
-                byteArrays.add(resolveVariables(value).toByteArray(Charsets.UTF_8))
-                byteArrays.add(lineBreak)
+                addString("Content-Disposition: form-data; name=\"$safeName\"\r\n\r\n")
+                addString(resolveVariables(value))
+                addString("\r\n")
             }
         }
-        byteArrays.add("--$boundary--\r\n".toByteArray(Charsets.UTF_8))
+        addString("--$boundary--\r\n")
 
-        val totalSize = byteArrays.sumOf { it.size }
-        val result = ByteArray(totalSize)
-        var offset = 0
-        for (arr in byteArrays) {
-            System.arraycopy(arr, 0, result, offset, arr.size)
-            offset += arr.size
-        }
-
-        return HttpRequest.BodyPublishers.ofByteArray(result) to "multipart/form-data; boundary=$boundary"
+        return HttpRequest.BodyPublishers.concat(*publishers.toTypedArray()) to
+            "multipart/form-data; boundary=$boundary"
     }
 
     private fun resolveVariables(input: String): String {
@@ -365,6 +369,17 @@ data class ResponseBodyData(
 )
 
 private val CHARSET_PATTERN = Regex("(?i)charset\\s*=\\s*([^;\\s]+)")
+
+internal fun escapeMultipartHeaderValue(value: String): String = buildString(value.length) {
+    for (ch in value) {
+        when (ch) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '\r', '\n' -> Unit
+            else -> append(ch)
+        }
+    }
+}
 
 /**
  * 从 `Content-Type` 头中提取 `charset=` 子参数，缺失或无效时回落到 UTF-8。

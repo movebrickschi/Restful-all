@@ -30,8 +30,8 @@ import com.intellij.openapi.project.Project
  * ## 兼容性 / 迁移
  *
  * v1.3.1 起 key 增加 `<projectHash>` 维度。读取时若新 key 未命中，会自动 fallback 到
- * 老格式 `restful-all:<namespace>:<suffix>`，命中后**写入新 key 并清掉老 key**，
- * 实现首次访问即静默迁移；用户无感知。
+ * 老格式 `restful-all:<namespace>:<suffix>`，命中后**复制写入新 key，但保留老 key**。
+ * 这样多个项目都能从同一个历史 legacy key 完成迁移，避免第一个打开的项目“抢走”旧密钥。
  *
  * ## 线程安全
  *
@@ -78,8 +78,9 @@ class SecretStorageService(private val project: Project) {
     /**
      * 读取密文。
      *
-     * 优先读项目隔离的新 key；未命中时尝试老 key（v1.3.0 留下的全局共享 key），
-     * 命中后透明迁移到新 key + 清掉老 key。
+     * 优先读项目隔离的新 key；未命中时尝试老 key（v1.3.0 留下的全局共享 key）。
+     * 命中后透明复制到新 key，但**不删除老 key**：legacy key 没有项目维度，删除会导致
+     * 其它项目无法完成迁移。
      *
      * @return 明文值，或 null（未存储 / PasswordSafe 不可用 / 解密失败）。
      */
@@ -95,9 +96,8 @@ class SecretStorageService(private val project: Project) {
             if (legacyValue != null) {
                 try {
                     PasswordSafe.instance.set(scopedAttr, Credentials(scoped, legacyValue))
-                    PasswordSafe.instance.set(legacyAttr, null)
                     thisLogger().info(
-                        "SecretStorageService: migrated legacy secret for namespaceKey=$namespaceKey to project-scoped key",
+                        "SecretStorageService: copied legacy secret for namespaceKey=$namespaceKey to project-scoped key",
                     )
                 } catch (migrateEx: Exception) {
                     thisLogger().warn(
